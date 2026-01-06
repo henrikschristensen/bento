@@ -1,0 +1,23 @@
+name: Repo sync (GitHub -> Codeberg)
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch: # Manual dispatch
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  sync-repo-to-forgejo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: "Sync repo"
+        uses: spyoungtech/mirror-action@master
+        with:
+          REMOTE: "https://codeberg.org/hsctech/bento.git"
+          GIT_USERNAME: hsctech
+          GIT_PASSWORD: ${{ secrets.CODEBERG_TOKEN }}
