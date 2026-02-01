@@ -1,5 +1,3 @@
-//go:build !wasm
-
 package io
 
 import (
@@ -7,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"sync"
 	"time"
 
@@ -36,6 +33,7 @@ This input adds the following metadata fields to each message:
 - fsevent_operation
 - fsevent_mod_time_unix
 - fsevent_mod_time (RFC3339)
+- fsevent_is_dir
 `+"```"+`
 
 You can access these metadata fields using
@@ -64,11 +62,7 @@ You can access these metadata fields using
 func init() {
 	err := service.RegisterInput("fsevent", fsEventInputSpec(),
 		func(pConf *service.ParsedConfig, res *service.Resources) (service.Input, error) {
-			r, err := fsEventWatcherFromParsed(pConf, res)
-			if err != nil {
-				return nil, err
-			}
-			return r, nil
+			return fsEventWatcherFromParsed(pConf, res)
 		})
 	if err != nil {
 		panic(err)
@@ -80,9 +74,9 @@ type fsEventWatcher struct {
 	nm              *service.Resources
 	watcher         *fsnotify.Watcher
 	eventChan       chan watcherEventMsg
-	cMut            sync.Mutex
+	cMut            sync.RWMutex
 	paths           []string
-	resursive       bool
+	recursive       bool
 	watchNewSubdirs bool
 }
 
@@ -111,7 +105,7 @@ func fsEventWatcherFromParsed(conf *service.ParsedConfig, nm *service.Resources)
 		nm:              nm,
 		log:             nm.Logger(),
 		paths:           paths,
-		resursive:       recursive,
+		recursive:       recursive,
 		watchNewSubdirs: wn,
 	}, nil
 }
@@ -138,7 +132,7 @@ func (f *fsEventWatcher) Connect(ctx context.Context) error {
 			f.log.Errorf("Failed to add path %v: %s", path, err)
 			return err
 		}
-		if f.resursive {
+		if f.recursive {
 			_ = filepath.WalkDir(path, func(path string, d fs.DirEntry, err error) error {
 				if d.IsDir() {
 					_ = watcher.Add(path)
@@ -157,17 +151,23 @@ func (f *fsEventWatcher) Connect(ctx context.Context) error {
 					return
 				}
 
+				// a create could be a new subdir. if enabled we will check
 				if f.watchNewSubdirs && event.Has(fsnotify.Create) {
 					st, err := os.Stat(event.Name)
-					if err == nil {
-						if st.IsDir() && !slices.Contains(f.watcher.WatchList(), event.Name) {
-							err = f.watcher.Add(event.Name)
-							if err != nil {
-								f.log.Warnf("Failed to add path %v: %s", event.Name, err)
-							}
-						}
-					} else {
+					if err != nil {
 						f.log.Warnf("Cannot check for new subpath: %s", err)
+						continue
+					}
+
+					// if it is a file dont add it.
+					if !st.IsDir() {
+						continue
+					}
+
+					// adding the same path more than once is a noop,
+					// so safe even though it is already in the watchlist
+					if err := f.watcher.Add(event.Name); err != nil {
+						f.log.Warnf("Failed to add path %v: %s", event.Name, err)
 					}
 				}
 
@@ -192,9 +192,9 @@ func (f *fsEventWatcher) Connect(ctx context.Context) error {
 }
 
 func (f *fsEventWatcher) Read(ctx context.Context) (*service.Message, service.AckFunc, error) {
-	f.cMut.Lock()
+	f.cMut.RLock()
+	defer f.cMut.RUnlock()
 	eventChan := f.eventChan
-	f.cMut.Unlock()
 
 	if eventChan == nil {
 		return nil, nil, service.ErrNotConnected
@@ -203,10 +203,8 @@ func (f *fsEventWatcher) Read(ctx context.Context) (*service.Message, service.Ac
 	select {
 	case msg, open := <-eventChan:
 		if !open {
-			f.cMut.Lock()
 			f.eventChan = nil
 			f.watcher = nil
-			f.cMut.Unlock()
 			return nil, nil, service.ErrEndOfInput
 		}
 
@@ -217,14 +215,19 @@ func (f *fsEventWatcher) Read(ctx context.Context) (*service.Message, service.Ac
 		timestamp := time.Unix(msg.timestampUnix, 0).Format(time.RFC3339)
 		message.MetaSetMut("fsevent_mod_time", timestamp)
 
+		// Try to get file info, but don't fail if the file doesn't exist (e.g., for DELETE events)
+		st, err := os.Stat(msg.event.Name)
+		if err == nil {
+			message.MetaSetMut("fsevent_is_dir", st.IsDir())
+		} else {
+			// For deleted files, we can't stat them, so set is_dir to false
+			message.MetaSetMut("fsevent_is_dir", false)
+		}
+
 		// check to see if the watchlist is empty.
-		f.cMut.Lock()
 		if f.watcher != nil && len(f.watcher.WatchList()) == 0 {
 			f.log.Warn("Nothing being watched. Closing the input.")
-			f.cMut.Unlock()
-			defer f.Close(context.TODO())
-		} else {
-			f.cMut.Unlock()
+			go f.Close(context.TODO())
 		}
 
 		return message, func(ctx context.Context, res error) error {
@@ -239,7 +242,7 @@ func (f *fsEventWatcher) Close(ctx context.Context) error {
 	f.cMut.Lock()
 	defer f.cMut.Unlock()
 
-	var err error = nil
+	var err error
 	if f.watcher != nil {
 		err = f.watcher.Close()
 		f.watcher = nil

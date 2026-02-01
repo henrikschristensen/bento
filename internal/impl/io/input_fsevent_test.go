@@ -159,7 +159,8 @@ fsevent:
 
 	require.NoError(t, os.WriteFile(file1, []byte("content1"), 0o644))
 
-	var dir1Event, dir2Event bool
+	// Wait for event from file1
+	var dir1Event bool
 	for j := 0; j < 10; j++ {
 		select {
 		case tran := <-i.TransactionChan():
@@ -172,14 +173,8 @@ fsevent:
 			operation := part.MetaGetStr("fsevent_operation")
 			assert.True(t, operation == "WRITE" || operation == "CREATE", "Expected WRITE or CREATE operation, got: %s", operation)
 
-			switch eventPath {
-			case file1:
+			if eventPath == file1 {
 				dir1Event = true
-			case file2:
-				dir2Event = true
-			}
-
-			if dir1Event && dir2Event {
 				break
 			}
 
@@ -190,6 +185,8 @@ fsevent:
 
 	require.NoError(t, os.WriteFile(file2, []byte("content2"), 0o644))
 
+	// Wait for event from file2
+	var dir2Event bool
 	for j := 0; j < 10; j++ {
 		select {
 		case tran := <-i.TransactionChan():
@@ -202,14 +199,8 @@ fsevent:
 			operation := part.MetaGetStr("fsevent_operation")
 			assert.True(t, operation == "WRITE" || operation == "CREATE", "Expected WRITE or CREATE operation, got: %s", operation)
 
-			switch eventPath {
-			case file1:
-				dir1Event = true
-			case file2:
+			if eventPath == file2 {
 				dir2Event = true
-			}
-
-			if dir1Event && dir2Event {
 				break
 			}
 
@@ -449,4 +440,64 @@ fsevent:
 
 	assert.True(t, subdirRecreated, "Should have received CREATE event for recreated subdirectory")
 	assert.True(t, file2Created, "Should have received event for file in recreated subdirectory")
+}
+
+func TestFSEventWatchNewSubdirsNestedLogic(t *testing.T) {
+	// This test specifically targets the nested logic at line 158 in input_fsevent.go
+	// that handles watching newly created subdirectories
+	dir := t.TempDir()
+	ctx, done := context.WithTimeout(context.Background(), time.Second*30)
+	defer done()
+
+	i := fseventInput(t, `
+fsevent:
+  paths: [ "%v" ]
+  watch_new_subdirs: true
+`, dir)
+
+	// Wait for the input to connect and start watching
+	time.Sleep(time.Second)
+
+	// Create a new subdirectory - this should trigger the nested logic
+	subdir := filepath.Join(dir, "newsubdir")
+	require.NoError(t, os.Mkdir(subdir, 0o755))
+
+	// Wait for the CREATE event to be processed
+	time.Sleep(time.Second)
+
+	// Now create a file in the new subdirectory - this should work because
+	// the nested logic should have added the subdirectory to the watcher
+	fileInSubdir := filepath.Join(subdir, "testfile.txt")
+	require.NoError(t, os.WriteFile(fileInSubdir, []byte("test content"), 0o644))
+
+	// We should receive events for both the subdir creation and the file creation
+	var subdirCreated, fileCreated bool
+	for j := 0; j < 10; j++ {
+		select {
+		case tran := <-i.TransactionChan():
+			require.NoError(t, tran.Ack(ctx, nil))
+			msg := tran.Payload
+			assert.Equal(t, 1, msg.Len())
+
+			part := msg.Get(0)
+			eventPath := part.MetaGetStr("fsevent_path")
+			operation := part.MetaGetStr("fsevent_operation")
+
+			if eventPath == subdir && operation == "CREATE" {
+				subdirCreated = true
+			} else if eventPath == fileInSubdir && (operation == "WRITE" || operation == "CREATE") {
+				fileCreated = true
+			}
+
+			if subdirCreated && fileCreated {
+				break
+			}
+
+		case <-time.After(time.Second * 1):
+			continue
+		}
+	}
+
+	assert.True(t, subdirCreated, "Should have received CREATE event for new subdirectory")
+	assert.True(t, fileCreated, "Should have received event for file in new subdirectory (nested logic working)")
 }
