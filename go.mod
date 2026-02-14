@@ -143,7 +143,7 @@ require (
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78
 	go.etcd.io/etcd/api/v3 v3.6.5
 	go.etcd.io/etcd/client/v3 v3.6.5
-	go.mongodb.org/mongo-driver v1.13.4
+	go.mongodb.org/mongo-driver v1.15.0
 	go.nanomsg.org/mangos/v3 v3.4.2
 	go.opentelemetry.io/otel v1.38.0
 	go.opentelemetry.io/otel/exporters/jaeger v1.17.0
@@ -199,6 +199,7 @@ require (
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/hamba/avro/v2 v2.29.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/karlseguin/jsonwriter v1.0.3 // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect
 	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 // indirect
 	github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3 // indirect
@@ -207,6 +208,9 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
+	github.com/pires/go-proxyproto v0.7.0 // indirect
+	github.com/quagmt/udecimal v1.8.0 // indirect
+	github.com/quickfixgo/quickfix v0.9.10 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	github.com/theparanoids/crypki v1.20.9 // indirect
@@ -396,7 +400,7 @@ require (
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/schollz/progressbar/v2 v2.15.0 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
-	github.com/shopspring/decimal v1.3.1 // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/slack-go/slack v0.17.3
 	github.com/snowplow/snowplow-golang-analytics-sdk v0.4.0
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
@@ -446,3 +450,5 @@ require (
 )
 
 go 1.25
+
+replace github.com/quickfixgo/quickfix => codeberg.org/hsctech/quickfix v1.9.10
