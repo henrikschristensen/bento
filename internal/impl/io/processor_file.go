@@ -177,7 +177,7 @@ func (p *fileProcessor) processRead(ctx context.Context, msg *service.Message) (
 	}
 	path = filepath.Clean(path)
 
-	file, err := p.nm.FS().Open(path)
+	file, err := p.nm.FS().OpenFile(path, os.O_RDONLY, fs.ModeExclusive)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file '%s': %w", path, err)
 	}
