@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/warpstreamlabs/bento/internal/component"
 	"github.com/warpstreamlabs/bento/public/service"
 )
@@ -177,7 +178,18 @@ func (p *fileProcessor) processRead(ctx context.Context, msg *service.Message) (
 	}
 	path = filepath.Clean(path)
 
-	file, err := p.nm.FS().OpenFile(path, os.O_RDONLY, fs.ModeExclusive)
+	filelock := flock.New(path)
+	defer filelock.Close()
+
+	locked, err := filelock.TryLock()
+	if err != nil {
+		return nil, err
+	}
+	if !locked {
+		return nil, fmt.Errorf("failed to obtain filelock before read")
+	}
+
+	file, err := p.nm.FS().Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file '%s': %w", path, err)
 	}
