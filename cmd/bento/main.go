@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	"github.com/warpstreamlabs/bento/internal/plugins"
 	"github.com/warpstreamlabs/bento/public/service"
 
 	// Import all plugins defined within the repo.
@@ -19,6 +20,7 @@ var (
 )
 
 func main() {
+	plugins.RegisterPlugins()
 	service.RunCLI(
 		context.Background(),
 		service.CLIOptSetVersion(Version, DateBuilt),

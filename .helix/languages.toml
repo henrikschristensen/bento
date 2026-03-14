@@ -1,0 +1,54 @@
+[language-server.powershell-editor-services]
+command = "pwsh"
+args = ["-NoLogo", "-NoProfile", "-Command", "powershell-editor-services -LogPath /root/.pseservices/log -SessionDetailsPath /root/.pseservices/session -HostName helix -HostProfileId 0 -HostVersion 1.0.0 -Stdio -LogLevel Normal"]
+
+[language-server.jdtls]
+command = "jdtls"
+
+[language-server.jdtls.config.initializationOptions]
+bundles = ["/root/.vscode/extensions/com.microsoft.java.debug.plugin-0.53.1.jar"]
+
+[[language]]
+name = "go"
+roots = ["go.work", "go.mod"]
+auto-format = true
+formatter = { command = "gofumpt" }
+language-servers = ["gopls"]
+
+[[language]]
+name = "c-sharp"
+roots = ["*.sln", "*.csproj", "omnisharp.json", ".git"]
+auto-format = true
+formatter = { command = "csharpier" }
+language-servers = ["omnisharp"]
+
+[[language]]
+name = "java"
+auto-format = true
+formatter = { command = "google-java-format" }
+language-servers = ["jdtls"]
+
+[[language]]
+name = "lua"
+auto-format = true
+formatter = { command = "lua-format" }
+language-servers = ["lua-language-server"]
+
+[[language]]
+name = "nix"
+auto-format = true
+formatter = { command = "nixfmt" }
+language-servers = ["nil"]
+
+[[language]]
+name = "yaml"
+auto-format = true
+formatter = { command = "yaml-language-server" }
+language-servers = ["yaml-language-server"]
+
+[[language]]
+name = "powershell"
+auto-format = true
+language-servers = ["powershell-editor-services"]
+file-types = ["ps", "ps1"]
+comment-token = "#"

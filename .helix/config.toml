@@ -1,0 +1,17 @@
+theme = "nord"
+
+[editor]
+true-color = true
+line-number = "relative"
+end-of-line-diagnostics = "hint"
+
+[editor.lsp]
+display-messages = true
+display-progress-messages = true
+display-inlay-hints = false
+
+[editor.cursor-shape]
+insert = "underline"
+
+[editor.inline-diagnostics]
+cursor-line = "warning"
