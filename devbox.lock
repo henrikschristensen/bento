@@ -1,6 +1,130 @@
 {
   "lockfile_version": "1",
   "packages": {
+    "bash@latest": {
+      "last_modified": "2026-03-10T11:06:14Z",
+      "resolved": "github:NixOS/nixpkgs/e34c50af092dffcf5edc419ebda28f18535b2a3b#bash",
+      "source": "devbox-search",
+      "version": "5.3p9",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/zk0hi525wn70pm93gzgdbb5k07y6x2lm-bash-interactive-5.3p9",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/nk78ds8cx0p396vacqs4qmrfaw8ad472-bash-interactive-5.3p9-man",
+              "default": true
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/c8kngjch0m8mwdqcwv2zv7yz67aw5z4k-bash-interactive-5.3p9-dev"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/y4rzpkhfs6hvh3ysicz5aqv6lyrxj3zm-bash-interactive-5.3p9-doc"
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/l560gnn1in8icznifirsl5my9pp4hsih-bash-interactive-5.3p9-info"
+            }
+          ],
+          "store_path": "/nix/store/zk0hi525wn70pm93gzgdbb5k07y6x2lm-bash-interactive-5.3p9"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/91v6ncz4is4rhjcg8pyw3dgj815nw7m4-bash-interactive-5.3p9",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/gvdc62sadciqxmwks03i0bbjhr37z4j7-bash-interactive-5.3p9-man",
+              "default": true
+            },
+            {
+              "name": "debug",
+              "path": "/nix/store/6af5mw6av65jksgdzrs7fx97dy49zmba-bash-interactive-5.3p9-debug"
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/mp96lqvw5icp8mvyz6wl55lziq6dfydy-bash-interactive-5.3p9-dev"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/s8g6q2sxp24s3a2lhvz6yq6mk015q8fd-bash-interactive-5.3p9-doc"
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/hny32fdj6v5yafcysk5n55dg4lsg3711-bash-interactive-5.3p9-info"
+            }
+          ],
+          "store_path": "/nix/store/91v6ncz4is4rhjcg8pyw3dgj815nw7m4-bash-interactive-5.3p9"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/kf4gkh9xvcya2a0nkrny3sahsddhmphg-bash-interactive-5.3p9",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/1a80g05pg3izr8mvq9igy13x2aqns6y8-bash-interactive-5.3p9-man",
+              "default": true
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/9ahpwl7q4c9ipal1vw9kk67jyil439ai-bash-interactive-5.3p9-dev"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/rymrmmbw0qpakhpmd8i6b39d18vkr7rg-bash-interactive-5.3p9-doc"
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/padz62afjydl2ksij6h805458cr1mgl4-bash-interactive-5.3p9-info"
+            }
+          ],
+          "store_path": "/nix/store/kf4gkh9xvcya2a0nkrny3sahsddhmphg-bash-interactive-5.3p9"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/0550j0i8bmzxbcnzrg1g51zigj7y12ih-bash-interactive-5.3p9",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/5vmwpgmif2wa2hw5ip3ab6q40wvyfw2w-bash-interactive-5.3p9-man",
+              "default": true
+            },
+            {
+              "name": "debug",
+              "path": "/nix/store/p0vr51d0fzrj5x250365pzgq2pdzy65y-bash-interactive-5.3p9-debug"
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/pg04l21ca5xaif9hplyi09lhqxbipkcx-bash-interactive-5.3p9-dev"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/6ha8m8sjy58l3pqkwl02wafsh6zjhqab-bash-interactive-5.3p9-doc"
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/hhdv8dsrgnb1f906nvdnd175j7wgiwlm-bash-interactive-5.3p9-info"
+            }
+          ],
+          "store_path": "/nix/store/0550j0i8bmzxbcnzrg1g51zigj7y12ih-bash-interactive-5.3p9"
+        }
+      }
+    },
     "delve@latest": {
       "last_modified": "2026-02-23T15:40:43Z",
       "resolved": "github:NixOS/nixpkgs/80d901ec0377e19ac3f7bb8c035201e2e098cc97#delve",

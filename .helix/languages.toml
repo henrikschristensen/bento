@@ -8,6 +8,13 @@ command = "jdtls"
 [language-server.jdtls.config.initializationOptions]
 bundles = ["/root/.vscode/extensions/com.microsoft.java.debug.plugin-0.53.1.jar"]
 
+[language-server.gopls]
+command = "gopls"
+environment = { "GOFLAGS" = "-tags=x_bento_extra" }
+
+[language-server.gopls.config.build]
+buildFlags = ["-tags=x_bento_extra"]
+
 [[language]]
 name = "go"
 roots = ["go.work", "go.mod"]
