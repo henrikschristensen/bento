@@ -1,6 +1,7 @@
-package bloblangplugins
+package bloblang
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 
@@ -74,6 +75,12 @@ func toFloat64(v any) (float64, error) {
 		return float64(n), nil
 	case uint64:
 		return float64(n), nil
+	case json.Number:
+		f, err := n.Float64()
+		if err != nil {
+			return 0, fmt.Errorf("could not parse json.Number %q as float64: %w", n, err)
+		}
+		return f, nil
 	default:
 		return 0, fmt.Errorf("expected a numeric value, got %T", v)
 	}

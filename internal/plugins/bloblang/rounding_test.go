@@ -1,6 +1,7 @@
-package bloblangplugins
+package bloblang
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -93,7 +94,10 @@ func TestToFloat64(t *testing.T) {
 		{name: "uint", input: uint(42), expected: 42},
 		{name: "uint32", input: uint32(42), expected: 42},
 		{name: "uint64", input: uint64(42), expected: 42},
-		{name: "string errors", input: "3.14", wantErr: true},
+		{name: "json.Number integer", input: json.Number("42"), expected: 42},
+		{name: "json.Number float", input: json.Number("3.14"), expected: 3.14},
+		{name: "json.Number invalid errors", input: json.Number("not-a-number"), wantErr: true},
+		
 		{name: "nil errors", input: nil, wantErr: true},
 		{name: "bool errors", input: true, wantErr: true},
 	}

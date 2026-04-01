@@ -13,33 +13,61 @@
 	    "delve@latest",
 	    "gnumake@latest",
 	    "starship@latest",
-      "jetbrains-mono@latest",
-      "github-copilot-cli@latest"
+      	   "jetbrains-mono@latest",
+	    "unzip@latest"
     ],
     "env": {
-      "BENTO_VERSION": "1.15.2"
+      "BENTO_VERSION": "1.16.1"
     },
     "shell": {
       "init_hook": [
         "echo 'Welcome to devbox!' > /dev/null"
       ],
       "scripts": {
+        "setup-mq": [
+          "MQ_LINUX_DIR=\"$DEVBOX_PROJECT_ROOT/.devbox/virtenv/ibmmq-linux\"",
+          "MQ_WIN_DIR=\"$DEVBOX_PROJECT_ROOT/.devbox/virtenv/ibmmq-win\"",
+          "MQ_BASE_URL=\"https://t-cmdnexus.corp.jyskebank.net/repository/MonitoringTools/ibmmq-redist\"",
+          "if [ ! -f \"$MQ_LINUX_DIR/.installed\" ]; then",
+          "  echo 'Downloading IBM MQ Linux redist...'",
+          "  mkdir -p \"$MQ_LINUX_DIR\"",
+          "  curl -fsSL \"$MQ_BASE_URL/9.4.4.0-IBM-MQC-Redist-LinuxX64.tar.gz\" | tar -xz -C \"$MQ_LINUX_DIR\"",
+          "  touch \"$MQ_LINUX_DIR/.installed\"",
+          "  echo 'IBM MQ Linux redist installed.'",
+          "else",
+          "  echo 'IBM MQ Linux redist already installed, skipping.'",
+          "fi",
+          "if [ ! -f \"$MQ_WIN_DIR/.installed\" ]; then",
+          "  echo 'Downloading IBM MQ Windows redist...'",
+          "  mkdir -p \"$MQ_WIN_DIR\"",
+          "  TMP=$(mktemp --suffix=.zip)",
+          "  curl -fsSL \"$MQ_BASE_URL/9.4.4.0-IBM-MQC-Redist-Win64.zip\" -o \"$TMP\"",
+          "  unzip -q \"$TMP\" -d \"$MQ_WIN_DIR\"",
+          "  rm \"$TMP\"",
+          "  touch \"$MQ_WIN_DIR/.installed\"",
+          "  echo 'IBM MQ Windows redist installed.'",
+          "else",
+          "  echo 'IBM MQ Windows redist already installed, skipping.'",
+          "fi"
+        ],
         "test": [
+          "devbox run setup-mq",
           "make test"
         ],
         "build-windows": [
-          "export MQ_INSTALLATION_PATH=/opt/mqm/win",
+          "export MQ_INSTALLATION_PATH=\"$DEVBOX_PROJECT_ROOT/.devbox/virtenv/ibmmq-win\"",
           "export CGO_CFLAGS=\"-I$MQ_INSTALLATION_PATH/tools/c/include -D_WIN64\"",
           "export CGO_LDFLAGS=\"-L$MQ_INSTALLATION_PATH/bin64 -lmqm\"",
-          "GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -tags x_ibmmq -o ./target/bin/bento.exe ./cmd/bento/main.go" 
+          "GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc go build -tags x_ibmmq -o ./target/bin/bento.exe ./cmd/bento/main.go"
         ],
         "build-linux": [
-          "export MQ_INSTALLATION_PATH=/opt/mqm",
+          "export MQ_INSTALLATION_PATH=\"$DEVBOX_PROJECT_ROOT/.devbox/virtenv/ibmmq-linux\"",
           "export CGO_CFLAGS=\"-I$MQ_INSTALLATION_PATH/inc\"",
           "export CGO_LDFLAGS=\"-L$MQ_INSTALLATION_PATH/lib64 -Wl,-rpath,$MQ_INSTALLATION_PATH/lib64\"",
           "GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -tags x_ibmmq -o ./target/bin/bento ./cmd/bento/main.go"
         ],
         "release": [
+          "devbox run setup-mq",
           "devbox run build-linux",
           "devbox run build-windows",
           "tar -czf bento_${BENTO_VERSION}_linux_amd64.tar.gz -C ./target/bin bento -C ../.. CHANGELOG.md LICENSE README.md",

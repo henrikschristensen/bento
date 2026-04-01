@@ -1,5 +1,7 @@
 target
 vendor
+.devbox/virtenv/ibmmq-linux
+.devbox/virtenv/ibmmq-win
 tmp
 site
 .tags

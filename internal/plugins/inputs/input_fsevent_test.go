@@ -1,4 +1,4 @@
-package custominputs
+package inputs
 
 import (
 	"context"
@@ -44,23 +44,27 @@ write_dedup_timeout: 200ms
 	// Perform rapid writes, each well within the dedup window, so the timer
 	// keeps getting reset and fires only once after the last write.
 	const numWrites = 5
+	var lastWriteAt time.Time
 	for i := 0; i < numWrites; i++ {
 		require.NoError(t, os.WriteFile(testFile, []byte(fmt.Sprintf("write %d", i)), 0644))
-		time.Sleep(10 * time.Millisecond)
+		lastWriteAt = time.Now()
+		if i < numWrites-1 {
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
-	lastWriteAt := time.Now()
 
-	// Collect all events: numWrites immediate events + 1 dedup event.
+	// With write deduplication enabled, all intermediate WRITE events are
+	// suppressed. Only a single CREATE event fires after write_dedup_timeout
+	// has elapsed since the last write.
 	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	var msgs []*service.Message
-	for len(msgs) < numWrites+1 {
-		msg, ack, err := input.Read(readCtx)
-		require.NoError(t, err)
-		require.NoError(t, ack(ctx, nil))
-		msgs = append(msgs, msg)
-	}
+	msg, ack, err := input.Read(readCtx)
+	require.NoError(t, err)
+	require.NoError(t, ack(ctx, nil))
+
+	op, _ := msg.MetaGet("fsevent_operation")
+	require.Equal(t, "CREATE", op, "dedup event should be a CREATE")
 
 	// The dedup timer fires once after write_dedup_timeout has elapsed since the
 	// last write, so total elapsed time must be at least dedupTimeout.
@@ -71,7 +75,7 @@ write_dedup_timeout: 200ms
 	// confirming the dedup timer fired exactly once.
 	noMoreCtx, noMoreCancel := context.WithTimeout(ctx, 150*time.Millisecond)
 	defer noMoreCancel()
-	_, _, err := input.Read(noMoreCtx)
+	_, _, err = input.Read(noMoreCtx)
 	require.ErrorIs(t, err, context.DeadlineExceeded,
 		"no extra events should be emitted after the single dedup event")
 }

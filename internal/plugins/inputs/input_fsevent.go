@@ -1,4 +1,4 @@
-package custominputs
+package inputs
 
 import (
 	"context"

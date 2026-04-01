@@ -29,3 +29,22 @@ func RegisterNewNats2MxMsg() {
 		}), nil
 	})
 }
+
+func RegisterFromNats2MxMsg() {
+	pspec := bloblang.NewPluginSpec().
+		Description("Decode a nats_mq bridge message and return the raw body as a string")
+
+	bloblang.RegisterFunctionV2("from_nats2mx_msg", pspec, func(args *bloblang.ParsedParams) (bloblang.Function, error) {
+		return nil, nil
+	})
+
+	bloblang.RegisterMethodV2("from_nats2mx_msg", pspec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
+		return bloblang.BytesMethod(func(b []byte) (any, error) {
+			msg, err := message.DecodeBridgeMessage(b)
+			if err != nil {
+				return nil, err
+			}
+			return string(msg.Body), nil
+		}), nil
+	})
+}

@@ -245,54 +245,6 @@
         }
       }
     },
-    "github-copilot-cli@latest": {
-      "last_modified": "2026-03-04T17:06:11Z",
-      "resolved": "github:NixOS/nixpkgs/400de68cd101e8cfebffea121397683caf7f5a34#github-copilot-cli",
-      "source": "devbox-search",
-      "version": "0.0.421",
-      "systems": {
-        "aarch64-darwin": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/4d2302xm4gdli2vbg342a6z3fnkb1bjk-github-copilot-cli-0.0.421",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/4d2302xm4gdli2vbg342a6z3fnkb1bjk-github-copilot-cli-0.0.421"
-        },
-        "aarch64-linux": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/yw5kh6iwhghy6fwf7z307ip00imxcc6y-github-copilot-cli-0.0.421",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/yw5kh6iwhghy6fwf7z307ip00imxcc6y-github-copilot-cli-0.0.421"
-        },
-        "x86_64-darwin": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/71raq93vl3awbqcl1ahbs1fm2lrhkga1-github-copilot-cli-0.0.421",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/71raq93vl3awbqcl1ahbs1fm2lrhkga1-github-copilot-cli-0.0.421"
-        },
-        "x86_64-linux": {
-          "outputs": [
-            {
-              "name": "out",
-              "path": "/nix/store/dhpw5nrcn0vlxr12idzahjj0jyvcaiy4-github-copilot-cli-0.0.421",
-              "default": true
-            }
-          ],
-          "store_path": "/nix/store/dhpw5nrcn0vlxr12idzahjj0jyvcaiy4-github-copilot-cli-0.0.421"
-        }
-      }
-    },
     "github:NixOS/nixpkgs/nixpkgs-unstable": {
       "last_modified": "2026-03-11T12:14:37Z",
       "resolved": "github:NixOS/nixpkgs/75690239f08f885ca9b0267580101f60d10fbe62?lastModified=1773231277&narHash=sha256-Xy3WEpUAbpsz8ydgvVAQAGGB%2FWB%2B8cNA5cshiL0McTI%3D"
@@ -802,6 +754,54 @@
             }
           ],
           "store_path": "/nix/store/s3fniw0gqhh5vl9w3v8yj5bd0hqi5nj2-starship-1.24.2"
+        }
+      }
+    },
+    "unzip@latest": {
+      "last_modified": "2026-03-02T11:03:52Z",
+      "resolved": "github:NixOS/nixpkgs/dc7513872406b53d2ff417a003895d6daffdff2f#unzip",
+      "source": "devbox-search",
+      "version": "6.0",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/avv4b5gsgbh3cfl5wnwrypnm2ggdppmw-unzip-6.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/avv4b5gsgbh3cfl5wnwrypnm2ggdppmw-unzip-6.0"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/zw7iisnjrgpgj8rvv9lywh63xys2j95m-unzip-6.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/zw7iisnjrgpgj8rvv9lywh63xys2j95m-unzip-6.0"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/cll6p0754g8xsx367q30zlcgi99zraqx-unzip-6.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/cll6p0754g8xsx367q30zlcgi99zraqx-unzip-6.0"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/il6p2vnh5rh75cwmf770p01b0mcw0d4s-unzip-6.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/il6p2vnh5rh75cwmf770p01b0mcw0d4s-unzip-6.0"
         }
       }
     },
