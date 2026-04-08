@@ -13,11 +13,12 @@ import (
 )
 
 const (
-	fieldWebhookURL = "webhook_url"
-	fieldTitle      = "title"
-	fieldThemeColor = "theme_color"
-	fieldTimeout    = "timeout"
-	fieldTLS        = "tls"
+	fieldWebhookURL          = "webhook_url"
+	fieldTitle               = "title"
+	fieldThemeColor          = "theme_color"
+	fieldTimeout             = "timeout"
+	fieldTLS                 = "tls"
+	fieldSkipURLValidation   = "skip_url_validation"
 )
 
 func teamsWebhookOutputSpec() *service.ConfigSpec {
@@ -47,6 +48,10 @@ The ` + "`title`" + ` and ` + "`theme_color`" + ` fields, when set, always overr
 				Advanced().
 				Default("5s"),
 			service.NewTLSToggledField(fieldTLS),
+		service.NewBoolField(fieldSkipURLValidation).
+				Description("When true, disables Microsoft Teams webhook URL validation. Useful for testing with local mock servers.").
+				Default(false).
+				Advanced(),
 		)
 }
 
@@ -70,7 +75,7 @@ type teamsWebhookWriter struct {
 	title             *service.InterpolatedString
 	themeColor        string
 	httpClient        *http.Client
-	skipURLValidation bool // settable in tests to bypass Microsoft URL check
+	skipURLValidation bool
 
 	mu     sync.RWMutex
 	client *goteamsnotify.TeamsClient
@@ -110,6 +115,10 @@ func newTeamsWebhookWriter(conf *service.ParsedConfig, mgr *service.Resources) (
 	}
 	if tlsEnabled {
 		w.httpClient.Transport = &http.Transport{TLSClientConfig: tlsConf}
+	}
+
+	if w.skipURLValidation, err = conf.FieldBool(fieldSkipURLValidation); err != nil {
+		return nil, err
 	}
 
 	return w, nil

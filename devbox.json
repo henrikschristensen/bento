@@ -17,7 +17,7 @@
 	    "unzip@latest"
     ],
     "env": {
-      "BENTO_VERSION": "1.16.1"
+      "BENTO_VERSION": "1.16.2"
     },
     "shell": {
       "init_hook": [
