@@ -30,13 +30,13 @@ func ibmMQInputSpec() *service.ConfigSpec {
 
 This input adds the following metadata fields to each message:
 
-` + "```text" + `
+`+"```text"+`
 - ibmmq_msg_id
 - ibmmq_correl_id
 - ibmmq_format
 - ibmmq_reply_to_q
 - ibmmq_reply_to_qmgr
-` + "```" + `
+`+"```"+`
 
 You can access these metadata fields using [function interpolation](/docs/configuration/interpolation#bloblang-queries).`).
 		Fields(
@@ -181,33 +181,44 @@ func (r *ibmMQReader) Read(ctx context.Context) (*service.Message, service.AckFu
 		return nil, nil, service.ErrNotConnected
 	}
 
-	mqmd := ibmmq.NewMQMD()
-	gmo := ibmmq.NewMQGMO()
+	// Build GMO options once; WaitInterval causes Get to block up to pollInterval
+	// before returning MQRC_NO_MSG_AVAILABLE, so we loop until a message arrives,
+	// a real error occurs, or the context is cancelled.
+	baseOptions := ibmmq.MQGMO_WAIT | ibmmq.MQGMO_FAIL_IF_QUIESCING
 	if r.useSyncPoint {
-		gmo.Options = ibmmq.MQGMO_SYNCPOINT | ibmmq.MQGMO_FAIL_IF_QUIESCING
+		baseOptions |= ibmmq.MQGMO_SYNCPOINT
 	} else {
-		gmo.Options = ibmmq.MQGMO_NO_SYNCPOINT | ibmmq.MQGMO_FAIL_IF_QUIESCING
+		baseOptions |= ibmmq.MQGMO_NO_SYNCPOINT
 	}
-
-	// Use a wait interval so we don't busy-loop; respect context cancellation.
 	waitMs := int32(r.pollInterval.Milliseconds())
-	gmo.Options |= ibmmq.MQGMO_WAIT
-	gmo.WaitInterval = waitMs
 
-	buf := make([]byte, 32*1024)
-	datalen, err := qObject.Get(mqmd, gmo, buf)
-	if err != nil {
-		mqret := err.(*ibmmq.MQReturn)
-		if mqret.MQRC == ibmmq.MQRC_NO_MSG_AVAILABLE {
-			// No message yet — signal caller to retry.
-			select {
-			case <-ctx.Done():
-				return nil, nil, ctx.Err()
-			default:
-			}
-			return nil, nil, nil
+	var (
+		mqmd    *ibmmq.MQMD
+		buf     []byte
+		datalen int
+	)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
 		}
-		return nil, nil, fmt.Errorf("IBM MQ get error: %w", err)
+
+		mqmd = ibmmq.NewMQMD()
+		gmo := ibmmq.NewMQGMO()
+		gmo.Options = baseOptions
+		gmo.WaitInterval = waitMs
+
+		buf = make([]byte, 32*1024)
+		var err error
+		datalen, err = qObject.Get(mqmd, gmo, buf)
+		if err != nil {
+			mqret := err.(*ibmmq.MQReturn)
+			if mqret.MQRC == ibmmq.MQRC_NO_MSG_AVAILABLE {
+				// Timed out waiting — check context and retry.
+				continue
+			}
+			return nil, nil, fmt.Errorf("IBM MQ get error: %w", err)
+		}
+		break
 	}
 
 	msg := service.NewMessage(buf[:datalen])
