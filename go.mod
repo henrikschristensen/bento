@@ -123,6 +123,7 @@ require (
 	github.com/prometheus/common v0.62.0
 	github.com/pusher/pusher-http-go v4.0.1+incompatible
 	github.com/questdb/go-questdb-client/v3 v3.2.0
+	github.com/quickfixgo/quickfix v0.9.10
 	github.com/quipo/dependencysolver v0.0.0-20170801134659-2b009cb4ddcc
 	github.com/r3labs/diff/v3 v3.0.1
 	github.com/rabbitmq/amqp091-go v1.9.0
@@ -184,7 +185,6 @@ require (
 	github.com/Masterminds/semver/v3 v3.3.0 // indirect
 	github.com/apache/arrow-go/v18 v18.5.1 // indirect
 	github.com/apache/thrift v0.22.0 // indirect
-	github.com/atc0005/go-teams-notify/v2 v2.14.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/signin v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/daulet/tokenizers v1.27.0 // indirect
