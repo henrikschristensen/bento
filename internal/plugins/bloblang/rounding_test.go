@@ -97,7 +97,7 @@ func TestToFloat64(t *testing.T) {
 		{name: "json.Number integer", input: json.Number("42"), expected: 42},
 		{name: "json.Number float", input: json.Number("3.14"), expected: 3.14},
 		{name: "json.Number invalid errors", input: json.Number("not-a-number"), wantErr: true},
-		
+
 		{name: "nil errors", input: nil, wantErr: true},
 		{name: "bool errors", input: true, wantErr: true},
 	}

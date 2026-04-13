@@ -17,11 +17,13 @@ func RegisterGetNumDaysInMonth() {
 	pSpec := bloblang.NewPluginSpec().
 		Description("Find the number of days in the month of the date given.")
 
-	bloblang.RegisterMethodV2("num_days_in_month", pSpec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
+	if err := bloblang.RegisterMethodV2("num_days_in_month", pSpec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
 		return bloblang.TimestampMethod(func(t time.Time) (any, error) {
 			return GetNumDaysInMonth(t), nil
 		}), nil
-	})
+	}); err != nil {
+		panic(err)
+	}
 }
 
 func RegisterCenterSliceSameMonth() {
@@ -30,22 +32,24 @@ func RegisterCenterSliceSameMonth() {
 		Param(bloblang.NewInt64Param("take")).
 		Param(bloblang.NewTimestampParam("min"))
 
-	bloblang.RegisterMethodV2("center_slice_same_month", pSpec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
+	if err := bloblang.RegisterMethodV2("center_slice_same_month", pSpec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
 		return bloblang.TimestampMethod(func(t time.Time) (any, error) {
 			take, err := args.GetInt64("take")
 			if err != nil {
 				return nil, err
 			}
-			min, err := args.GetTimestamp("min")
+			minDate, err := args.GetTimestamp("min")
 			if err != nil {
 				return nil, err
 			}
-			return CenterSliceSameMonth(t, take, min), nil
+			return CenterSliceSameMonth(t, take, minDate), nil
 		}), nil
-	})
+	}); err != nil {
+		panic(err)
+	}
 }
 
-func CenterSliceSameMonth(t time.Time, take int64, min time.Time) []time.Time {
+func CenterSliceSameMonth(t time.Time, take int64, minDate time.Time) []time.Time {
 	var result []time.Time
 	result = append(result, t)
 	next := t
@@ -57,7 +61,7 @@ func CenterSliceSameMonth(t time.Time, take int64, min time.Time) []time.Time {
 				result = append(result, next)
 			}
 		} else if !previous.IsZero() {
-			previous = previousDate(t.Month(), previous, min)
+			previous = previousDate(t.Month(), previous, minDate)
 			if !previous.IsZero() {
 				result = append(result, previous)
 			}
@@ -79,12 +83,12 @@ func nextDate(month time.Month, current time.Time) time.Time {
 	return next
 }
 
-func previousDate(month time.Month, current time.Time, min time.Time) time.Time {
+func previousDate(month time.Month, current time.Time, minDate time.Time) time.Time {
 	previous := current.AddDate(0, 0, -1)
 	if previous.Weekday() == time.Sunday {
 		previous = previous.AddDate(0, 0, -2)
 	}
-	if previous.Month() != month || previous.Before(min) {
+	if previous.Month() != month || previous.Before(minDate) {
 		return time.Time{}
 	}
 	return previous
@@ -111,7 +115,7 @@ func RegisterTimeDiffDaysAbsolute() {
 		Param(bloblang.NewStringParam("b")).
 		Param(bloblang.NewStringParam("f"))
 
-	bloblang.RegisterMethodV2("timediff_days_absolute", pSpec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
+	if err := bloblang.RegisterMethodV2("timediff_days_absolute", pSpec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
 		return bloblang.StringMethod(func(s string) (any, error) {
 			b, err := args.GetString("b")
 			if err != nil {
@@ -123,7 +127,9 @@ func RegisterTimeDiffDaysAbsolute() {
 			}
 			return timediff_days_absolute(s, b, f)
 		}), nil
-	})
+	}); err != nil {
+		panic(err)
+	}
 }
 
 func find_nearest_date_from_slice(s []time.Time, date time.Time) time.Time {
@@ -143,7 +149,7 @@ func RegisterFindNearestDateFromSlice() {
 		Description("Returns the date from slice nearest the date in question, or time zero if none found.").
 		Param(bloblang.NewTimestampParam("date"))
 
-	bloblang.RegisterMethodV2("find_nearest_date_from_slice", pSpec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
+	if err := bloblang.RegisterMethodV2("find_nearest_date_from_slice", pSpec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
 		return bloblang.ArrayMethod(func(a []any) (any, error) {
 			date, err := args.GetTimestamp("date")
 			if err != nil {
@@ -155,5 +161,7 @@ func RegisterFindNearestDateFromSlice() {
 			}
 			return find_nearest_date_from_slice(dates, date), nil
 		}), nil
-	})
+	}); err != nil {
+		panic(err)
+	}
 }

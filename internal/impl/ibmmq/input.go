@@ -5,7 +5,6 @@ package ibmmq
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +16,10 @@ import (
 const (
 	iiFieldPollInterval = "poll_interval"
 	iiFieldSyncPoint    = "use_sync_point"
+	iiFieldGetOptions   = "get_options"
+	iiFieldMsgFormat    = "message_format"
+	iiFieldOpenOptions  = "open_options"
+	iiFieldConnOptions  = "connection_options"
 )
 
 func ibmMQInputSpec() *service.ConfigSpec {
@@ -31,12 +34,40 @@ func ibmMQInputSpec() *service.ConfigSpec {
 This input adds the following metadata fields to each message:
 
 `+"```text"+`
+- ibmmq_version
+- ibmmq_report
+- ibmmq_msg_type
+- ibmmq_expiry
+- ibmmq_feedback
+- ibmmq_encoding
+- ibmmq_coded_char_set_id
+- ibmmq_format
+- ibmmq_priority
+- ibmmq_persistence
 - ibmmq_msg_id
 - ibmmq_correl_id
-- ibmmq_format
+- ibmmq_backout_count
 - ibmmq_reply_to_q
 - ibmmq_reply_to_qmgr
+- ibmmq_user_identifier
+- ibmmq_accounting_token
+- ibmmq_appl_identity_data
+- ibmmq_put_appl_type
+- ibmmq_put_appl_name
+- ibmmq_put_date
+- ibmmq_put_time
+- ibmmq_appl_origin_data
+- ibmmq_group_id
+- ibmmq_msg_seq_number
+- ibmmq_offset
+- ibmmq_msg_flags
+- ibmmq_original_length
 `+"```"+`
+
+Integer fields are formatted as decimal strings. Byte-array fields
+(`+"`ibmmq_msg_id`"+`, `+"`ibmmq_correl_id`"+`, `+"`ibmmq_accounting_token`"+`,
+`+"`ibmmq_group_id`"+`) are upper-case hex-encoded. String fields have trailing
+spaces trimmed.
 
 You can access these metadata fields using [function interpolation](/docs/configuration/interpolation#bloblang-queries).`).
 		Fields(
@@ -68,6 +99,22 @@ You can access these metadata fields using [function interpolation](/docs/config
 				Description("When true, messages are retrieved under a syncpoint (transaction). The message is only removed from the queue once the ack function is called successfully; a nack triggers a backout.").
 				Default(false).
 				Advanced(),
+			service.NewStringListField(iiFieldGetOptions).
+				Description("A list of GMO (Get Message Options) flags to apply when retrieving messages. These are OR'd together. Valid values: "+optionKeysDoc(gmoOptionNames)+". The syncpoint flags are always overridden by `use_sync_point`.").
+				Default([]any{MQGmoWait, MQGmoFailIfQuiescing}).
+				Advanced(),
+			service.NewStringField(iiFieldMsgFormat).
+				Description("The MQMD message format to request when retrieving messages. When set alongside `"+MQGmoConvert+"` in `get_options`, the queue manager will convert the message data to this format before returning it. Accepts well-known aliases ("+mqfmtKeysDoc()+") or a raw string up to 8 characters. Defaults to `"+MQFmtNone+"` (no conversion requested).").
+				Default(MQFmtNone).
+				Advanced(),
+			service.NewStringListField(iiFieldOpenOptions).
+				Description("A list of MQOO (Open Options) flags used when opening the queue for reading. These are OR'd together. Valid values: "+optionKeysDoc(mqooOptionNames)+".").
+				Default([]any{MQOoInputShared, MQOoFailIfQuiescing}).
+				Advanced(),
+			service.NewStringListField(iiFieldConnOptions).
+				Description("A list of MQCNO (Connection Options) flags used when connecting to the queue manager. These are OR'd together. Valid values: "+optionKeysDoc(mqcnoOptionNames)+".").
+				Default([]any{MQCnoClientBinding}).
+				Advanced(),
 		)
 }
 
@@ -91,6 +138,10 @@ type ibmMQReader struct {
 	password     string
 	pollInterval time.Duration
 	useSyncPoint bool
+	getOptions   int32
+	msgFormat    string
+	openOptions  int32
+	connOptions  int32
 
 	connMut sync.Mutex
 	qMgr    *ibmmq.MQQueueManager
@@ -123,6 +174,34 @@ func newIBMMQReaderFromParsed(conf *service.ParsedConfig, mgr *service.Resources
 	if r.useSyncPoint, err = conf.FieldBool(iiFieldSyncPoint); err != nil {
 		return nil, err
 	}
+	getOptionNames, err := conf.FieldStringList(iiFieldGetOptions)
+	if err != nil {
+		return nil, err
+	}
+	if r.getOptions, err = parseGMOOptions(getOptionNames); err != nil {
+		return nil, err
+	}
+	msgFormatRaw, err := conf.FieldString(iiFieldMsgFormat)
+	if err != nil {
+		return nil, err
+	}
+	if r.msgFormat, err = resolveMQMDFormat(msgFormatRaw); err != nil {
+		return nil, err
+	}
+	openOptionNames, err := conf.FieldStringList(iiFieldOpenOptions)
+	if err != nil {
+		return nil, err
+	}
+	if r.openOptions, err = parseMQOOOptions(openOptionNames); err != nil {
+		return nil, err
+	}
+	connOptionNames, err := conf.FieldStringList(iiFieldConnOptions)
+	if err != nil {
+		return nil, err
+	}
+	if r.connOptions, err = parseMQCNOOptions(connOptionNames); err != nil {
+		return nil, err
+	}
 	return r, nil
 }
 
@@ -135,7 +214,7 @@ func (r *ibmMQReader) Connect(ctx context.Context) error {
 	}
 
 	cno := ibmmq.NewMQCNO()
-	cno.Options = ibmmq.MQCNO_CLIENT_BINDING
+	cno.Options = r.connOptions
 
 	cd := ibmmq.NewMQCD()
 	cd.ChannelName = r.channel
@@ -159,7 +238,7 @@ func (r *ibmMQReader) Connect(ctx context.Context) error {
 	mqod.ObjectName = r.queue
 	mqod.ObjectType = ibmmq.MQOT_Q
 
-	openOptions := ibmmq.MQOO_INPUT_SHARED | ibmmq.MQOO_FAIL_IF_QUIESCING
+	openOptions := r.openOptions
 	qObject, err := qMgr.Open(mqod, openOptions)
 	if err != nil {
 		_ = qMgr.Disc()
@@ -181,14 +260,14 @@ func (r *ibmMQReader) Read(ctx context.Context) (*service.Message, service.AckFu
 		return nil, nil, service.ErrNotConnected
 	}
 
-	// Build GMO options once; WaitInterval causes Get to block up to pollInterval
+	// Build GMO options; WaitInterval causes Get to block up to pollInterval
 	// before returning MQRC_NO_MSG_AVAILABLE, so we loop until a message arrives,
 	// a real error occurs, or the context is cancelled.
-	baseOptions := ibmmq.MQGMO_WAIT | ibmmq.MQGMO_FAIL_IF_QUIESCING
+	baseOptions := r.getOptions
 	if r.useSyncPoint {
-		baseOptions |= ibmmq.MQGMO_SYNCPOINT
+		baseOptions = (baseOptions &^ ibmmq.MQGMO_NO_SYNCPOINT) | ibmmq.MQGMO_SYNCPOINT
 	} else {
-		baseOptions |= ibmmq.MQGMO_NO_SYNCPOINT
+		baseOptions = (baseOptions &^ ibmmq.MQGMO_SYNCPOINT) | ibmmq.MQGMO_NO_SYNCPOINT
 	}
 	waitMs := int32(r.pollInterval.Milliseconds())
 
@@ -203,6 +282,7 @@ func (r *ibmMQReader) Read(ctx context.Context) (*service.Message, service.AckFu
 		}
 
 		mqmd = ibmmq.NewMQMD()
+		mqmd.Format = r.msgFormat
 		gmo := ibmmq.NewMQGMO()
 		gmo.Options = baseOptions
 		gmo.WaitInterval = waitMs
@@ -222,11 +302,7 @@ func (r *ibmMQReader) Read(ctx context.Context) (*service.Message, service.AckFu
 	}
 
 	msg := service.NewMessage(buf[:datalen])
-	msg.MetaSetMut("ibmmq_msg_id", fmt.Sprintf("%X", mqmd.MsgId))
-	msg.MetaSetMut("ibmmq_correl_id", fmt.Sprintf("%X", mqmd.CorrelId))
-	msg.MetaSetMut("ibmmq_format", strings.TrimSpace(mqmd.Format))
-	msg.MetaSetMut("ibmmq_reply_to_q", strings.TrimSpace(mqmd.ReplyToQ))
-	msg.MetaSetMut("ibmmq_reply_to_qmgr", strings.TrimSpace(mqmd.ReplyToQMgr))
+	mqmdToMeta(mqmd, msg)
 
 	return msg, func(_ context.Context, aErr error) error {
 		if !r.useSyncPoint {

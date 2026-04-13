@@ -45,8 +45,8 @@ write_dedup_timeout: 200ms
 	// keeps getting reset and fires only once after the last write.
 	const numWrites = 5
 	var lastWriteAt time.Time
-	for i := 0; i < numWrites; i++ {
-		require.NoError(t, os.WriteFile(testFile, []byte(fmt.Sprintf("write %d", i)), 0644))
+	for i := range numWrites {
+		require.NoError(t, os.WriteFile(testFile, fmt.Appendf(nil, "write %d", i), 0644))
 		lastWriteAt = time.Now()
 		if i < numWrites-1 {
 			time.Sleep(10 * time.Millisecond)

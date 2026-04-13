@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/warpstreamlabs/bento/public/service"
 	_ "github.com/warpstreamlabs/bento/internal/impl/pure"
+	"github.com/warpstreamlabs/bento/public/service"
 )
 
 func TestFileProcessorRead(t *testing.T) {

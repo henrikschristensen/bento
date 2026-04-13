@@ -108,13 +108,17 @@ func RegisterRoundingInEnv(env *bloblang.Environment) {
 			Default("half_up"))
 
 	if env != nil {
-		env.RegisterMethodV2("round_precise", spec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
+		if err := env.RegisterMethodV2("round_precise", spec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
 			return makeRoundMethod(args)
-		})
+		}); err != nil {
+			panic(err)
+		}
 	} else {
-		bloblang.RegisterMethodV2("round_precise", spec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
+		if err := bloblang.RegisterMethodV2("round_precise", spec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
 			return makeRoundMethod(args)
-		})
+		}); err != nil {
+			panic(err)
+		}
 	}
 }
 

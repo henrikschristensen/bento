@@ -1,9 +1,10 @@
 package bloblang
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/text/encoding/charmap"
-	"testing"
 )
 
 func TestEbcdicToUtf8(t *testing.T) {

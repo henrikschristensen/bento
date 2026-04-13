@@ -18,7 +18,7 @@ func RegisterEBCDICTOUTF8() {
 	pspec := bloblang.NewPluginSpec().
 		Description("Convert from EBCDIC (IBM-785/CodePage1047) to UTF-8")
 
-	bloblang.RegisterMethodV2("ebcdic_to_utf8", pspec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
+	if err := bloblang.RegisterMethodV2("ebcdic_to_utf8", pspec, func(args *bloblang.ParsedParams) (bloblang.Method, error) {
 		return bloblang.BytesMethod(func(s []byte) (any, error) {
 			utf8bytes, err := ebcdic_to_utf8(s)
 			if err != nil {
@@ -26,5 +26,7 @@ func RegisterEBCDICTOUTF8() {
 			}
 			return utf8bytes, nil
 		}), nil
-	})
+	}); err != nil {
+		panic(err)
+	}
 }

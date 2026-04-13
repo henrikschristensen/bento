@@ -241,5 +241,5 @@ settings: |
 	assert.Contains(t, bodyStr, "35=D\x01")
 	assert.Contains(t, bodyStr, "11=ORDER001\x01")
 	// Trailing SOH must be trimmed by FromApp.
-	assert.NotEqual(t, "\x01", string(bodyStr[len(bodyStr)-1:]))
+	assert.NotEqual(t, "\x01", bodyStr[len(bodyStr)-1:])
 }

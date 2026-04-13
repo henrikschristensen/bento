@@ -354,7 +354,7 @@ func (f *fsEventWatcher) Connect(ctx context.Context) error {
 					f.cMut.Unlock()
 				}
 
-				if f.writeDedupTimeout != time.Duration(time.Second*0) {
+				if f.writeDedupTimeout != 0 {
 					f.handleWriteDeduplication(event)
 				} else {
 					if !f.matchesExtension(event.Name) {

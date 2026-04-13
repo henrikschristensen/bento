@@ -13,12 +13,12 @@ import (
 )
 
 const (
-	fieldWebhookURL          = "webhook_url"
-	fieldTitle               = "title"
-	fieldThemeColor          = "theme_color"
-	fieldTimeout             = "timeout"
-	fieldTLS                 = "tls"
-	fieldSkipURLValidation   = "skip_url_validation"
+	fieldWebhookURL        = "webhook_url"
+	fieldTitle             = "title"
+	fieldThemeColor        = "theme_color"
+	fieldTimeout           = "timeout"
+	fieldTLS               = "tls"
+	fieldSkipURLValidation = "skip_url_validation"
 )
 
 func teamsWebhookOutputSpec() *service.ConfigSpec {
@@ -30,7 +30,7 @@ Sends messages to a Microsoft Teams channel using the [go-teams-notify](https://
 
 If the message payload is a valid JSON object matching the [MessageCard](https://learn.microsoft.com/en-us/outlook/actionable-messages/message-card-reference) schema it is sent directly. Otherwise a simple MessageCard is constructed with the raw message content as the card text.
 
-The ` + "`title`" + ` and ` + "`theme_color`" + ` fields, when set, always override the values in the card (even when the message is already a valid MessageCard).`).
+The `+"`title`"+` and `+"`theme_color`"+` fields, when set, always override the values in the card (even when the message is already a valid MessageCard).`).
 		Fields(
 			service.NewStringField(fieldWebhookURL).
 				Description("The Microsoft Teams incoming webhook URL.").
@@ -48,7 +48,7 @@ The ` + "`title`" + ` and ` + "`theme_color`" + ` fields, when set, always overr
 				Advanced().
 				Default("5s"),
 			service.NewTLSToggledField(fieldTLS),
-		service.NewBoolField(fieldSkipURLValidation).
+			service.NewBoolField(fieldSkipURLValidation).
 				Description("When true, disables Microsoft Teams webhook URL validation. Useful for testing with local mock servers.").
 				Default(false).
 				Advanced(),
