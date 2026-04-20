@@ -3,24 +3,21 @@ package inputs
 import (
 	"context"
 	"io/fs"
-	"math"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
 	"github.com/warpstreamlabs/bento/public/service"
 )
 
 const (
-	fsEventInputFieldPaths                     = "paths"
-	fsEventInputFieldIsRecursive               = "is_recursive"
-	fsEventInputFieldWatchNewSubdirs           = "watch_new_subdirs"
-	fsEventInputFieldWriteDedupTimeout         = "write_dedup_timeout"
-	fsEventInputFieldExtensions                = "extensions"
-	fsEventInputFieldExistingFilesPollInterval = "existing_files_poll_interval"
-	fsEventInputFieldExistingFilesMinAge       = "existing_files_min_age"
+	fsEventInputFieldPaths           = "paths"
+	fsEventInputFieldIsRecursive     = "is_recursive"
+	fsEventInputFieldWatchNewSubdirs = "watch_new_subdirs"
+	fsEventInputFieldExtensions      = "extensions"
 )
 
 func fsEventInputSpec() *service.ConfigSpec {
@@ -47,7 +44,6 @@ You can access these metadata fields using
 |---------|-----|
 |CREATE   |A new pathname was created.|
 |WRITE    |The pathname was written to; this does *not* mean the write has finished, and a write can be followed by more writes.|
-|WRITTEN  |The pathname was written to; if write deduplication timeout was set > 0, this fires when last write duration expires.|
 |REMOVE   |The path was removed; any watches on it will be removed. Some "remove" operations may trigger a RENAME if the file is actually moved (for example "remove to trash" is often a rename).|
 |RENAME   |The path was renamed to something else. Any watches on it will be removed.|
 |CHMOD    |File attributes were changed. It's generally not recommended to take action on this event, as it may get triggered very frequently by some software. For example, Spotlight indexing on macOS, anti-virus software, backup software, etc.|
@@ -61,18 +57,9 @@ You can access these metadata fields using
 			service.NewBoolField(fsEventInputFieldWatchNewSubdirs).
 				Description("If set, events from subdirs created after the input is started, will also be watched.").
 				Default(false),
-			service.NewDurationField(fsEventInputFieldWriteDedupTimeout).
-				Description("If set, no events will be fired until last file write was 'timeout' ago, then the WRITTEN event fires.").
-				Default("0s"),
 			service.NewStringListField(fsEventInputFieldExtensions).
 				Description("An optional list of file extensions to filter events for (e.g. `[\".txt\", \".log\"]`). If empty, events for all files are emitted.").
 				Default([]any{}),
-			service.NewDurationField(fsEventInputFieldExistingFilesPollInterval).
-				Description("If set to a value greater than zero, the configured paths are scanned repeatedly at this interval and CREATE events are emitted for files not yet seen. Files are tracked across scans to avoid duplicate events.").
-				Default("0s"),
-			service.NewDurationField(fsEventInputFieldExistingFilesMinAge).
-				Description("When `existing_files_poll_interval` is active, only files whose last modification time is older than this duration are emitted. Useful to skip files that are still being written.").
-				Default("0s"),
 		)
 }
 
@@ -91,21 +78,15 @@ func RegisterFsEventInput() {
 }
 
 type fsEventWatcher struct {
-	log                       *service.Logger
-	nm                        *service.Resources
-	watcher                   *fsnotify.Watcher
-	eventChan                 chan watcherEventMsg
-	closeCh                   chan struct{}
-	cMut                      sync.RWMutex
-	paths                     []string
-	recursive                 bool
-	watchNewSubdirs           bool
-	writeDedupTimeout         time.Duration
-	writeDedupTimers          map[string]*time.Timer
-	extensions                map[string]struct{}
-	existingFilesPollInterval time.Duration
-	existingFilesMinAge       time.Duration
-	scannedFiles              map[string]struct{}
+	log             *service.Logger
+	nm              *service.Resources
+	watcher         *fsnotify.Watcher
+	eventChan       chan watcherEventMsg
+	cMut            sync.RWMutex
+	paths           []string
+	recursive       bool
+	watchNewSubdirs bool
+	extensions      map[string]struct{}
 }
 
 type watcherEventMsg struct {
@@ -129,11 +110,6 @@ func fsEventWatcherFromParsed(conf *service.ParsedConfig, nm *service.Resources)
 		return nil, err
 	}
 
-	wdt, err := conf.FieldDuration(fsEventInputFieldWriteDedupTimeout)
-	if err != nil {
-		return nil, err
-	}
-
 	extList, err := conf.FieldStringList(fsEventInputFieldExtensions)
 	if err != nil {
 		return nil, err
@@ -146,28 +122,13 @@ func fsEventWatcherFromParsed(conf *service.ParsedConfig, nm *service.Resources)
 		extMap[ext] = struct{}{}
 	}
 
-	pollInterval, err := conf.FieldDuration(fsEventInputFieldExistingFilesPollInterval)
-	if err != nil {
-		return nil, err
-	}
-
-	minAge, err := conf.FieldDuration(fsEventInputFieldExistingFilesMinAge)
-	if err != nil {
-		return nil, err
-	}
-
 	return &fsEventWatcher{
-		nm:                        nm,
-		log:                       nm.Logger(),
-		paths:                     paths,
-		recursive:                 recursive,
-		watchNewSubdirs:           wn,
-		writeDedupTimeout:         wdt,
-		writeDedupTimers:          make(map[string]*time.Timer),
-		extensions:                extMap,
-		existingFilesPollInterval: pollInterval,
-		existingFilesMinAge:       minAge,
-		scannedFiles:              make(map[string]struct{}),
+		nm:              nm,
+		log:             nm.Logger(),
+		paths:           paths,
+		recursive:       recursive,
+		watchNewSubdirs: wn,
+		extensions:      extMap,
 	}, nil
 }
 
@@ -179,93 +140,6 @@ func (f *fsEventWatcher) matchesExtension(path string) bool {
 	return ok
 }
 
-func (f *fsEventWatcher) scanExistingFiles(eventChan chan watcherEventMsg, closeCh chan struct{}) {
-	now := time.Now()
-	for _, p := range f.paths {
-		_ = filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if d.IsDir() {
-				if !f.recursive && path != p {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if !f.matchesExtension(path) {
-				return nil
-			}
-			info, err := d.Info()
-			if err != nil {
-				return nil
-			}
-			if f.existingFilesMinAge > 0 && now.Sub(info.ModTime()) < f.existingFilesMinAge {
-				return nil
-			}
-			f.cMut.Lock()
-			_, alreadyEmitted := f.scannedFiles[path]
-			if !alreadyEmitted {
-				f.scannedFiles[path] = struct{}{}
-			}
-			f.cMut.Unlock()
-			if alreadyEmitted {
-				return nil
-			}
-			select {
-			case eventChan <- watcherEventMsg{
-				event:         fsnotify.Event{Op: fsnotify.Create, Name: path},
-				timestampUnix: info.ModTime().Unix(),
-			}:
-			case <-closeCh:
-				return filepath.SkipAll
-			}
-			return nil
-		})
-	}
-}
-
-func (f *fsEventWatcher) handleWriteDeduplication(e fsnotify.Event) {
-	// We just want to watch for file creation, so ignore everything
-	// outside of Create and Write.
-	if !e.Has(fsnotify.Create) && !e.Has(fsnotify.Write) {
-		return
-	}
-
-	if !f.matchesExtension(e.Name) {
-		return
-	}
-
-	// Get timer.
-	f.cMut.Lock()
-	defer f.cMut.Unlock()
-	t, ok := f.writeDedupTimers[e.Name]
-
-	// No timer yet, so create one.
-	if !ok {
-		t = time.AfterFunc(math.MaxInt64, func() {
-			f.cMut.Lock()
-			delete(f.writeDedupTimers, e.Name)
-			f.cMut.Unlock()
-
-			msg := watcherEventMsg{
-				event: fsnotify.Event{
-					Op:   fsnotify.Create,
-					Name: e.Name,
-				},
-				timestampUnix: time.Now().Unix(),
-			}
-
-			f.eventChan <- msg
-		})
-
-		t.Stop()
-
-		f.writeDedupTimers[e.Name] = t
-	}
-
-	t.Reset(f.writeDedupTimeout)
-}
-
 func (f *fsEventWatcher) Connect(ctx context.Context) error {
 	f.cMut.Lock()
 	defer f.cMut.Unlock()
@@ -275,7 +149,6 @@ func (f *fsEventWatcher) Connect(ctx context.Context) error {
 	}
 
 	eventChan := make(chan watcherEventMsg)
-	closeCh := make(chan struct{})
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -299,26 +172,8 @@ func (f *fsEventWatcher) Connect(ctx context.Context) error {
 		}
 	}
 
-	// If configured, start a recurring scan that emits CREATE events for
-	// pre-existing (and newly appearing) files whose age exceeds existingFilesMinAge.
-	if f.existingFilesPollInterval > 0 {
-		go func() {
-			ticker := time.NewTicker(f.existingFilesPollInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					f.scanExistingFiles(eventChan, closeCh)
-				case <-closeCh:
-					return
-				}
-			}
-		}()
-	}
-
 	go func() {
 		defer close(eventChan)
-
 		for {
 			select {
 			case event, ok := <-watcher.Events:
@@ -346,27 +201,16 @@ func (f *fsEventWatcher) Connect(ctx context.Context) error {
 					}
 				}
 
-				// Evict removed/renamed files from the scanned set so they are
-				// re-emitted if they reappear during a future poll scan.
-				if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
-					f.cMut.Lock()
-					delete(f.scannedFiles, event.Name)
-					f.cMut.Unlock()
+				if !f.matchesExtension(event.Name) {
+					continue
 				}
 
-				if f.writeDedupTimeout != 0 {
-					f.handleWriteDeduplication(event)
-				} else {
-					if !f.matchesExtension(event.Name) {
-						continue
-					}
-					msg := watcherEventMsg{
-						event:         event,
-						timestampUnix: time.Now().Unix(),
-					}
-
-					f.eventChan <- msg
+				msg := watcherEventMsg{
+					event:         event,
+					timestampUnix: time.Now().Unix(),
 				}
+
+				f.eventChan <- msg
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
@@ -378,7 +222,6 @@ func (f *fsEventWatcher) Connect(ctx context.Context) error {
 
 	f.watcher = watcher
 	f.eventChan = eventChan
-	f.closeCh = closeCh
 	return nil
 }
 
@@ -395,9 +238,9 @@ func (f *fsEventWatcher) Read(ctx context.Context) (*service.Message, service.Ac
 	case msg, open := <-eventChan:
 		if !open {
 			f.cMut.Lock()
+			defer f.cMut.Unlock()
 			f.eventChan = nil
 			f.watcher = nil
-			f.cMut.Unlock()
 			return nil, nil, service.ErrEndOfInput
 		}
 
@@ -408,14 +251,11 @@ func (f *fsEventWatcher) Read(ctx context.Context) (*service.Message, service.Ac
 		timestamp := time.Unix(msg.timestampUnix, 0).Format(time.RFC3339)
 		message.MetaSetMut("fsevent_mod_time", timestamp)
 
-		// Try to get file info, but don't fail if the file doesn't exist (e.g., for DELETE events)
-		st, err := os.Stat(msg.event.Name)
-		if err == nil {
-			message.MetaSetMut("fsevent_is_dir", st.IsDir())
-		} else {
-			// For deleted files, we can't stat them, so set is_dir to false
-			message.MetaSetMut("fsevent_is_dir", false)
+		var isDir bool
+		if st, err := os.Stat(msg.event.Name); err == nil {
+			isDir = st.IsDir()
 		}
+		message.MetaSetMut("fsevent_is_dir", isDir)
 
 		// check to see if the watchlist is empty.
 		if f.watcher != nil && len(f.watcher.WatchList()) == 0 {
@@ -434,11 +274,6 @@ func (f *fsEventWatcher) Read(ctx context.Context) (*service.Message, service.Ac
 func (f *fsEventWatcher) Close(ctx context.Context) error {
 	f.cMut.Lock()
 	defer f.cMut.Unlock()
-
-	if f.closeCh != nil {
-		close(f.closeCh)
-		f.closeCh = nil
-	}
 
 	var err error
 	if f.watcher != nil {

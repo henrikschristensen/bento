@@ -8,74 +8,541 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/warpstreamlabs/bento/public/service"
+	"github.com/warpstreamlabs/bento/internal/component/input"
+	"github.com/warpstreamlabs/bento/internal/component/testutil"
+	"github.com/warpstreamlabs/bento/internal/manager/mock"
+
+	_ "github.com/warpstreamlabs/bento/internal/impl/io"
 )
 
-func fseventInput(t testing.TB, confPattern string, args ...any) service.Input {
-	confSpec := fsEventInputSpec()
-	conf, err := confSpec.ParseYAML(fmt.Sprintf(confPattern, args...), nil)
+func fseventInput(t testing.TB, confPattern string, args ...any) input.Streamed {
+	iConf, err := testutil.InputFromYAML(fmt.Sprintf(confPattern, args...))
 	require.NoError(t, err)
 
-	batchInput, err := fsEventWatcherFromParsed(conf, service.MockResources())
+	i, err := mock.NewManager().NewInput(iConf)
 	require.NoError(t, err)
-	return batchInput
+
+	return i
 }
 
-func TestFSEventWriteDedup(t *testing.T) {
-	tmpDir := t.TempDir()
+func TestFSEventBasic(t *testing.T) {
+	dir := t.TempDir()
+	ctx, done := context.WithTimeout(context.Background(), time.Second*30)
+	defer done()
 
-	// Pre-create the file before connecting so the CREATE event is not captured.
-	testFile := filepath.Join(tmpDir, "test.txt")
-	require.NoError(t, os.WriteFile(testFile, []byte("initial"), 0644))
+	testFile := filepath.Join(dir, "test.txt")
+	require.NoError(t, os.WriteFile(testFile, []byte("initial content"), 0o644))
 
-	const dedupTimeout = 200 * time.Millisecond
-	input := fseventInput(t, `
-paths:
-  - %s
-write_dedup_timeout: 200ms
-`, tmpDir)
+	i := fseventInput(t, `
+fsevent:
+  paths: [ "%v" ]
+`, testFile)
 
-	ctx := context.Background()
-	require.NoError(t, input.Connect(ctx))
-	t.Cleanup(func() { _ = input.Close(context.Background()) })
+	// Wait for the input to connect and start watching
+	time.Sleep(time.Second)
 
-	// Perform rapid writes, each well within the dedup window, so the timer
-	// keeps getting reset and fires only once after the last write.
-	const numWrites = 5
-	var lastWriteAt time.Time
-	for i := range numWrites {
-		require.NoError(t, os.WriteFile(testFile, fmt.Appendf(nil, "write %d", i), 0644))
-		lastWriteAt = time.Now()
-		if i < numWrites-1 {
-			time.Sleep(10 * time.Millisecond)
+	err := os.WriteFile(testFile, []byte("modified content"), 0o644)
+	require.NoError(t, err)
+
+	select {
+	case tran := <-i.TransactionChan():
+		require.NoError(t, tran.Ack(ctx, nil))
+		msg := tran.Payload
+		assert.Equal(t, 1, msg.Len())
+
+		// Check metadata fields
+		part := msg.Get(0)
+		assert.Equal(t, testFile, part.MetaGetStr("fsevent_path"))
+		assert.NotEmpty(t, part.MetaGetStr("fsevent_operation"))
+		assert.NotEmpty(t, part.MetaGetStr("fsevent_mod_time_unix"))
+		assert.NotEmpty(t, part.MetaGetStr("fsevent_mod_time"))
+
+		operation := part.MetaGetStr("fsevent_operation")
+		assert.Contains(t, operation, "WRITE")
+
+	case <-time.After(time.Second * 5):
+		t.Fatal("timed out waiting for filesystem event")
+	}
+}
+
+func TestFSEventCreateFile(t *testing.T) {
+	dir := t.TempDir()
+	ctx, done := context.WithTimeout(context.Background(), time.Second*30)
+	defer done()
+
+	i := fseventInput(t, `
+fsevent:
+  paths: [ "%v" ]
+`, dir)
+
+	// Wait for the input to connect and start watching
+	time.Sleep(time.Second)
+
+	newFile := filepath.Join(dir, "newfile.txt")
+	err := os.WriteFile(newFile, []byte("new file content"), 0o644)
+	require.NoError(t, err)
+
+	select {
+	case tran := <-i.TransactionChan():
+		require.NoError(t, tran.Ack(ctx, nil))
+		msg := tran.Payload
+		assert.Equal(t, 1, msg.Len())
+
+		part := msg.Get(0)
+		assert.Equal(t, newFile, part.MetaGetStr("fsevent_path"))
+
+		operation := part.MetaGetStr("fsevent_operation")
+		assert.Contains(t, operation, "CREATE")
+
+	case <-time.After(time.Second * 5):
+		t.Fatal("timed out waiting for create event")
+	}
+}
+
+func TestFSEventDeleteFile(t *testing.T) {
+	dir := t.TempDir()
+	ctx, done := context.WithTimeout(context.Background(), time.Second*30)
+	defer done()
+
+	testFile := filepath.Join(dir, "test.txt")
+	require.NoError(t, os.WriteFile(testFile, []byte("content"), 0o644))
+
+	i := fseventInput(t, `
+fsevent:
+  paths: [ "%v" ]
+`, testFile)
+
+	// Wait for the input to connect and start watching
+	time.Sleep(time.Second)
+
+	err := os.Remove(testFile)
+	require.NoError(t, err)
+
+	select {
+	case tran := <-i.TransactionChan():
+		require.NoError(t, tran.Ack(ctx, nil))
+		msg := tran.Payload
+		assert.Equal(t, 1, msg.Len())
+
+		part := msg.Get(0)
+		assert.Equal(t, testFile, part.MetaGetStr("fsevent_path"))
+
+		// The operation should be REMOVE or CHMOD (some filesystems send CHMOD before REMOVE)
+		operation := part.MetaGetStr("fsevent_operation")
+		assert.Contains(t, operation, "CHMOD", "Expected CHMOD operation, got: %s", operation)
+
+	case <-time.After(time.Second * 5):
+		t.Fatal("timed out waiting for delete event")
+	}
+}
+
+func TestFSEventMultipleDirs(t *testing.T) {
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+	ctx, done := context.WithTimeout(context.Background(), time.Second*30)
+	defer done()
+
+	// Watch both directories
+	i := fseventInput(t, `
+fsevent:
+  paths: [ "%v", "%v" ]
+`, dir1, dir2)
+
+	// Give the watcher a moment to start up
+	time.Sleep(time.Second)
+
+	file1 := filepath.Join(dir1, "file1.txt")
+	file2 := filepath.Join(dir2, "file2.txt")
+
+	require.NoError(t, os.WriteFile(file1, []byte("content1"), 0o644))
+
+	// Wait for event from file1
+	var dir1Event bool
+	for j := 0; j < 10; j++ {
+		select {
+		case tran := <-i.TransactionChan():
+			require.NoError(t, tran.Ack(ctx, nil))
+			msg := tran.Payload
+			assert.Equal(t, 1, msg.Len())
+
+			part := msg.Get(0)
+			eventPath := part.MetaGetStr("fsevent_path")
+			operation := part.MetaGetStr("fsevent_operation")
+			assert.True(t, operation == "WRITE" || operation == "CREATE", "Expected WRITE or CREATE operation, got: %s", operation)
+
+			if eventPath == file1 {
+				dir1Event = true
+				break
+			}
+
+		case <-time.After(time.Second * 1):
+			continue
 		}
 	}
 
-	// With write deduplication enabled, all intermediate WRITE events are
-	// suppressed. Only a single CREATE event fires after write_dedup_timeout
-	// has elapsed since the last write.
-	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	require.NoError(t, os.WriteFile(file2, []byte("content2"), 0o644))
 
-	msg, ack, err := input.Read(readCtx)
-	require.NoError(t, err)
-	require.NoError(t, ack(ctx, nil))
+	// Wait for event from file2
+	var dir2Event bool
+	for j := 0; j < 10; j++ {
+		select {
+		case tran := <-i.TransactionChan():
+			require.NoError(t, tran.Ack(ctx, nil))
+			msg := tran.Payload
+			assert.Equal(t, 1, msg.Len())
 
-	op, _ := msg.MetaGet("fsevent_operation")
-	require.Equal(t, "CREATE", op, "dedup event should be a CREATE")
+			part := msg.Get(0)
+			eventPath := part.MetaGetStr("fsevent_path")
+			operation := part.MetaGetStr("fsevent_operation")
+			assert.True(t, operation == "WRITE" || operation == "CREATE", "Expected WRITE or CREATE operation, got: %s", operation)
 
-	// The dedup timer fires once after write_dedup_timeout has elapsed since the
-	// last write, so total elapsed time must be at least dedupTimeout.
-	require.GreaterOrEqual(t, time.Since(lastWriteAt), dedupTimeout,
-		"dedup event should not fire before write_dedup_timeout expires")
+			if eventPath == file2 {
+				dir2Event = true
+				break
+			}
 
-	// Verify no additional (spurious) events arrive within a short grace period,
-	// confirming the dedup timer fired exactly once.
-	noMoreCtx, noMoreCancel := context.WithTimeout(ctx, 150*time.Millisecond)
-	defer noMoreCancel()
-	_, _, err = input.Read(noMoreCtx)
-	require.ErrorIs(t, err, context.DeadlineExceeded,
-		"no extra events should be emitted after the single dedup event")
+		case <-time.After(time.Second * 1):
+			continue
+		}
+	}
+
+	assert.True(t, dir1Event, "Should have received event from dir1")
+	assert.True(t, dir2Event, "Should have received event from dir2")
+}
+
+func TestFSEventWatchNewSubdirs(t *testing.T) {
+	dir := t.TempDir()
+	ctx, done := context.WithTimeout(context.Background(), time.Second*30)
+	defer done()
+
+	i := fseventInput(t, `
+fsevent:
+  paths: [ "%v" ]
+  watch_new_subdirs: true
+`, dir)
+
+	// Wait for the input to connect and start watching
+	time.Sleep(time.Second)
+
+	subdir := filepath.Join(dir, "subdir")
+	require.NoError(t, os.Mkdir(subdir, 0o755))
+
+	// Wait a bit for the CREATE event to be processed
+	time.Sleep(time.Second)
+
+	fileInSubdir := filepath.Join(subdir, "file.txt")
+	require.NoError(t, os.WriteFile(fileInSubdir, []byte("content"), 0o644))
+
+	// We should receive events for both the subdir creation and the file creation
+	var subdirCreated, fileCreated bool
+	for j := 0; j < 10; j++ {
+		select {
+		case tran := <-i.TransactionChan():
+			require.NoError(t, tran.Ack(ctx, nil))
+			msg := tran.Payload
+			assert.Equal(t, 1, msg.Len())
+
+			part := msg.Get(0)
+			eventPath := part.MetaGetStr("fsevent_path")
+			operation := part.MetaGetStr("fsevent_operation")
+
+			if eventPath == subdir && operation == "CREATE" {
+				subdirCreated = true
+			} else if eventPath == fileInSubdir && (operation == "WRITE" || operation == "CREATE") {
+				fileCreated = true
+			}
+
+			if subdirCreated && fileCreated {
+				break
+			}
+
+		case <-time.After(time.Second * 1):
+			continue
+		}
+	}
+
+	assert.True(t, subdirCreated, "Should have received CREATE event for subdirectory")
+	assert.True(t, fileCreated, "Should have received event for file in subdirectory")
+}
+
+func TestFSEventWatchNewSubdirsDisabled(t *testing.T) {
+	dir := t.TempDir()
+	ctx, done := context.WithTimeout(context.Background(), time.Second*30)
+	defer done()
+
+	i := fseventInput(t, `
+fsevent:
+  paths: [ "%v" ]
+  watch_new_subdirs: false
+`, dir)
+
+	// Wait for the input to connect and start watching
+	time.Sleep(time.Second)
+
+	subdir := filepath.Join(dir, "subdir")
+	require.NoError(t, os.Mkdir(subdir, 0o755))
+
+	// Wait a bit for the CREATE event to be processed
+	time.Sleep(time.Second)
+
+	fileInSubdir := filepath.Join(subdir, "file.txt")
+	require.NoError(t, os.WriteFile(fileInSubdir, []byte("content"), 0o644))
+
+	var subdirCreated, fileCreated bool
+	for j := 0; j < 10; j++ {
+		select {
+		case tran := <-i.TransactionChan():
+			require.NoError(t, tran.Ack(ctx, nil))
+			msg := tran.Payload
+			assert.Equal(t, 1, msg.Len())
+
+			part := msg.Get(0)
+			eventPath := part.MetaGetStr("fsevent_path")
+			operation := part.MetaGetStr("fsevent_operation")
+
+			if eventPath == subdir && operation == "CREATE" {
+				subdirCreated = true
+			} else if eventPath == fileInSubdir && (operation == "WRITE" || operation == "CREATE") {
+				fileCreated = true
+			}
+
+			if fileCreated {
+				break
+			}
+
+		case <-time.After(time.Second * 1):
+			continue
+		}
+	}
+
+	assert.True(t, subdirCreated, "Should have received CREATE event for subdirectory")
+	assert.False(t, fileCreated, "Should NOT have received event for file in subdirectory when watch_new_subdirs is disabled")
+}
+
+func TestFSEventWatchNewSubdirsDeleteRecreate(t *testing.T) {
+	dir := t.TempDir()
+	ctx, done := context.WithTimeout(context.Background(), time.Second*30)
+	defer done()
+
+	i := fseventInput(t, `
+fsevent:
+  paths: [ "%v" ]
+  watch_new_subdirs: true
+`, dir)
+
+	// Wait for the input to connect and start watching
+	time.Sleep(time.Second)
+
+	subdir := filepath.Join(dir, "subdir")
+	require.NoError(t, os.Mkdir(subdir, 0o755))
+
+	// Wait a bit for the CREATE event to be processed
+	time.Sleep(time.Second)
+
+	file1 := filepath.Join(subdir, "file1.txt")
+	require.NoError(t, os.WriteFile(file1, []byte("content1"), 0o644))
+
+	var subdirCreated, file1Created bool
+	for j := 0; j < 10; j++ {
+		select {
+		case tran := <-i.TransactionChan():
+			require.NoError(t, tran.Ack(ctx, nil))
+			msg := tran.Payload
+			assert.Equal(t, 1, msg.Len())
+
+			part := msg.Get(0)
+			eventPath := part.MetaGetStr("fsevent_path")
+			operation := part.MetaGetStr("fsevent_operation")
+
+			if eventPath == subdir && operation == "CREATE" {
+				subdirCreated = true
+			} else if eventPath == file1 && (operation == "WRITE" || operation == "CREATE") {
+				file1Created = true
+			}
+
+			if subdirCreated && file1Created {
+				break
+			}
+
+		case <-time.After(time.Second * 1):
+			continue
+		}
+	}
+
+	assert.True(t, subdirCreated, "Should have received CREATE event for subdirectory")
+	assert.True(t, file1Created, "Should have received event for file in subdirectory")
+
+	require.NoError(t, os.RemoveAll(subdir))
+
+	var subdirDeleted bool
+	for j := 0; j < 10; j++ {
+		select {
+		case tran := <-i.TransactionChan():
+			require.NoError(t, tran.Ack(ctx, nil))
+			msg := tran.Payload
+			assert.Equal(t, 1, msg.Len())
+
+			part := msg.Get(0)
+			eventPath := part.MetaGetStr("fsevent_path")
+			operation := part.MetaGetStr("fsevent_operation")
+
+			if eventPath == subdir && (operation == "REMOVE" || operation == "CHMOD") {
+				subdirDeleted = true
+			}
+
+			if subdirDeleted {
+				break
+			}
+
+		case <-time.After(time.Second * 1):
+			continue
+		}
+	}
+
+	assert.True(t, subdirDeleted, "Should have received DELETE event for subdirectory")
+
+	time.Sleep(time.Second) // Give it a moment
+	require.NoError(t, os.Mkdir(subdir, 0o755))
+
+	time.Sleep(time.Second) // Give it a moment
+	file2 := filepath.Join(subdir, "file2.txt")
+	require.NoError(t, os.WriteFile(file2, []byte("content2"), 0o644))
+
+	var subdirRecreated, file2Created bool
+	for j := 0; j < 10; j++ {
+		select {
+		case tran := <-i.TransactionChan():
+			require.NoError(t, tran.Ack(ctx, nil))
+			msg := tran.Payload
+			assert.Equal(t, 1, msg.Len())
+
+			part := msg.Get(0)
+			eventPath := part.MetaGetStr("fsevent_path")
+			operation := part.MetaGetStr("fsevent_operation")
+
+			if eventPath == subdir && operation == "CREATE" {
+				subdirRecreated = true
+			} else if eventPath == file2 && (operation == "WRITE" || operation == "CREATE") {
+				file2Created = true
+			}
+
+			if subdirRecreated && file2Created {
+				break
+			}
+
+		case <-time.After(time.Second * 1):
+			continue
+		}
+	}
+
+	assert.True(t, subdirRecreated, "Should have received CREATE event for recreated subdirectory")
+	assert.True(t, file2Created, "Should have received event for file in recreated subdirectory")
+}
+
+func TestFSEventWatchNewSubdirsNestedLogic(t *testing.T) {
+	// This test specifically targets the nested logic at line 158 in input_fsevent.go
+	// that handles watching newly created subdirectories
+	dir := t.TempDir()
+	ctx, done := context.WithTimeout(context.Background(), time.Second*30)
+	defer done()
+
+	i := fseventInput(t, `
+fsevent:
+  paths: [ "%v" ]
+  watch_new_subdirs: true
+`, dir)
+
+	// Wait for the input to connect and start watching
+	time.Sleep(time.Second)
+
+	// Create a new subdirectory - this should trigger the nested logic
+	subdir := filepath.Join(dir, "newsubdir")
+	require.NoError(t, os.Mkdir(subdir, 0o755))
+
+	// Wait for the CREATE event to be processed
+	time.Sleep(time.Second)
+
+	// Now create a file in the new subdirectory - this should work because
+	// the nested logic should have added the subdirectory to the watcher
+	fileInSubdir := filepath.Join(subdir, "testfile.txt")
+	require.NoError(t, os.WriteFile(fileInSubdir, []byte("test content"), 0o644))
+
+	// We should receive events for both the subdir creation and the file creation
+	var subdirCreated, fileCreated bool
+	for j := 0; j < 10; j++ {
+		select {
+		case tran := <-i.TransactionChan():
+			require.NoError(t, tran.Ack(ctx, nil))
+			msg := tran.Payload
+			assert.Equal(t, 1, msg.Len())
+
+			part := msg.Get(0)
+			eventPath := part.MetaGetStr("fsevent_path")
+			operation := part.MetaGetStr("fsevent_operation")
+
+			if eventPath == subdir && operation == "CREATE" {
+				subdirCreated = true
+			} else if eventPath == fileInSubdir && (operation == "WRITE" || operation == "CREATE") {
+				fileCreated = true
+			}
+
+			if subdirCreated && fileCreated {
+				break
+			}
+
+		case <-time.After(time.Second * 1):
+			continue
+		}
+	}
+
+	assert.True(t, subdirCreated, "Should have received CREATE event for new subdirectory")
+	assert.True(t, fileCreated, "Should have received event for file in new subdirectory (nested logic working)")
+}
+
+func TestFSEventExtensionFilter(t *testing.T) {
+	dir := t.TempDir()
+	ctx, done := context.WithTimeout(context.Background(), time.Second*30)
+	defer done()
+
+	i := fseventInput(t, `
+fsevent:
+  paths: [ "%v" ]
+  extensions: [ ".txt" ]
+`, dir)
+
+	time.Sleep(time.Second)
+
+	// This file should be filtered out
+	ignoredFile := filepath.Join(dir, "ignored.log")
+	require.NoError(t, os.WriteFile(ignoredFile, []byte("should be ignored"), 0o644))
+
+	time.Sleep(500 * time.Millisecond)
+
+	// This file should trigger an event
+	matchedFile := filepath.Join(dir, "matched.txt")
+	require.NoError(t, os.WriteFile(matchedFile, []byte("should be seen"), 0o644))
+
+	var gotEvent bool
+	for j := 0; j < 10; j++ {
+		select {
+		case tran := <-i.TransactionChan():
+			require.NoError(t, tran.Ack(ctx, nil))
+			part := tran.Payload.Get(0)
+			eventPath := part.MetaGetStr("fsevent_path")
+			assert.NotEqual(t, ignoredFile, eventPath, "Should not receive events for filtered extensions")
+			if eventPath == matchedFile {
+				gotEvent = true
+			}
+		case <-time.After(time.Second * 1):
+			if gotEvent {
+				return
+			}
+			continue
+		}
+	}
+
+	assert.True(t, gotEvent, "Should have received event for .txt file")
 }
