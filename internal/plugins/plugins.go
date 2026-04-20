@@ -3,7 +3,6 @@ package plugins
 import (
 	"github.com/warpstreamlabs/bento/internal/plugins/bloblang"
 	"github.com/warpstreamlabs/bento/internal/plugins/inputs"
-	"github.com/warpstreamlabs/bento/internal/plugins/processors"
 )
 
 func RegisterPlugins() {
@@ -16,5 +15,4 @@ func RegisterPlugins() {
 	bloblang.RegisterTimeDiffDaysAbsolute()
 	bloblang.RegisterRounding()
 	inputs.RegisterFsEventInput()
-	processors.RegisterFileProcessor()
 }
