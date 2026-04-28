@@ -3,13 +3,14 @@ package quickfix
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
 	"testing"
 	"time"
 
-	goquickfix "github.com/quickfixgo/quickfix"
+	goquickfix "codeberg.org/hsctech/quickfix"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -69,7 +70,33 @@ SocketConnectHost=127.0.0.1
 SocketConnectPort=%d`, port)
 }
 
-// indentLines prefixes every non-empty line of s with prefix.
+// acceptorCfg2 returns QuickFIX settings for a second server session with different comp IDs.
+func acceptorCfg2(port int) string {
+	return fmt.Sprintf(`[DEFAULT]
+ConnectionType=acceptor
+HeartBtInt=30
+SenderCompID=SERVER2
+TargetCompID=CLIENT2
+BeginString=FIX.4.4
+
+[SESSION]
+SocketAcceptPort=%d`, port)
+}
+
+// initiatorCfg2 returns QuickFIX settings for a second client session with different comp IDs.
+func initiatorCfg2(port int) string {
+	return fmt.Sprintf(`[DEFAULT]
+ConnectionType=initiator
+HeartBtInt=30
+SenderCompID=CLIENT2
+TargetCompID=SERVER2
+BeginString=FIX.4.4
+ReconnectInterval=1
+
+[SESSION]
+SocketConnectHost=127.0.0.1
+SocketConnectPort=%d`, port)
+}
 func indentLines(s, prefix string) string {
 	lines := strings.Split(s, "\n")
 	for i, l := range lines {
@@ -242,4 +269,145 @@ settings: |
 	assert.Contains(t, bodyStr, "11=ORDER001\x01")
 	// Trailing SOH must be trimmed by FromApp.
 	assert.NotEqual(t, "\x01", bodyStr[len(bodyStr)-1:])
+}
+
+// --- JSON pipeline round-trip test -------------------------------------------
+
+// TestQuickfixJSONPipelineRoundTrip simulates a bento pipeline where:
+//  1. An initiator output sends a raw FIX New Order Single to an acceptor input
+//     configured with message_format=json.
+//  2. The acceptor input emits the message as JSON; the test modifies a field
+//     (ClOrdID) to simulate a bloblang/processor transform.
+//  3. The modified JSON is written to a second initiator output configured with
+//     message_format=json, which re-encodes it to FIX and sends it to a second
+//     acceptor input (raw format).
+//  4. The second acceptor verifies that the field modification is present in the
+//     received FIX message.
+func TestQuickfixJSONPipelineRoundTrip(t *testing.T) {
+	port1 := freePort(t)
+	port2 := freePort(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// --- Session 1: raw initiator output → json acceptor input ---------------
+
+	inp1Conf, err := quickfixInputSpec().ParseYAML(fmt.Sprintf(`
+connection_type: acceptor
+message_format: json
+settings: |
+%s
+`, indentLines(acceptorCfg(port1), "  ")), nil)
+	require.NoError(t, err)
+	inp1, err := newQuickfixInputFromParsed(inp1Conf, service.MockResources())
+	require.NoError(t, err)
+	require.NoError(t, inp1.Connect(ctx))
+	t.Cleanup(func() { _ = inp1.Close(ctx) })
+
+	out1Conf, err := quickfixOutputSpec().ParseYAML(fmt.Sprintf(`
+connection_type: initiator
+message_format: raw
+settings: |
+%s
+`, indentLines(initiatorCfg(port1), "  ")), nil)
+	require.NoError(t, err)
+	out1, err := newQuickfixOutputFromParsed(out1Conf, service.MockResources())
+	require.NoError(t, err)
+	require.NoError(t, out1.Connect(ctx))
+	t.Cleanup(func() { _ = out1.Close(ctx) })
+
+	// --- Session 2: json initiator output → raw acceptor input ---------------
+
+	inp2Conf, err := quickfixInputSpec().ParseYAML(fmt.Sprintf(`
+connection_type: acceptor
+message_format: raw
+settings: |
+%s
+`, indentLines(acceptorCfg2(port2), "  ")), nil)
+	require.NoError(t, err)
+	inp2, err := newQuickfixInputFromParsed(inp2Conf, service.MockResources())
+	require.NoError(t, err)
+	require.NoError(t, inp2.Connect(ctx))
+	t.Cleanup(func() { _ = inp2.Close(ctx) })
+
+	out2Conf, err := quickfixOutputSpec().ParseYAML(fmt.Sprintf(`
+connection_type: initiator
+message_format: json
+settings: |
+%s
+`, indentLines(initiatorCfg2(port2), "  ")), nil)
+	require.NoError(t, err)
+	out2, err := newQuickfixOutputFromParsed(out2Conf, service.MockResources())
+	require.NoError(t, err)
+	require.NoError(t, out2.Connect(ctx))
+	t.Cleanup(func() { _ = out2.Close(ctx) })
+
+	// Wait for both FIX sessions to establish.
+	require.Eventually(t, func() bool {
+		out1.sessionsMut.RLock()
+		s1 := len(out1.loggedOnSessions) > 0
+		out1.sessionsMut.RUnlock()
+		out2.sessionsMut.RLock()
+		s2 := len(out2.loggedOnSessions) > 0
+		out2.sessionsMut.RUnlock()
+		return s1 && s2
+	}, 15*time.Second, 100*time.Millisecond, "timed out waiting for FIX sessions to log on")
+
+	// Step 1: send a raw New Order Single via out1.
+	rawFIX := buildRawFIX("FIX.4.4", "D", "CLIENT", "SERVER", map[goquickfix.Tag]string{
+		goquickfix.Tag(11): "ORDER001", // ClOrdID
+		goquickfix.Tag(55): "AAPL",    // Symbol
+	})
+	require.NoError(t, out1.Write(ctx, service.NewMessage(rawFIX)))
+
+	// Step 2: read the JSON message from inp1.
+	readCtx, readCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer readCancel()
+
+	jsonMsg, ackFn, err := inp1.Read(readCtx)
+	require.NoError(t, err)
+	require.NoError(t, ackFn(ctx, nil))
+
+	jsonBytes, err := jsonMsg.AsBytes()
+	require.NoError(t, err)
+
+	// Verify it really is JSON with the expected fields.
+	var envelope map[string]map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(jsonBytes, &envelope), "input should emit valid JSON")
+	body := envelope["Body"]
+	require.NotNil(t, body)
+
+	var clOrdID string
+	require.NoError(t, json.Unmarshal(body["11"], &clOrdID))
+	assert.Equal(t, "ORDER001", clOrdID)
+
+	// Step 3: simulate a pipeline transform — change ClOrdID to "ORDER002" and
+	// reroute to the second session's comp IDs.
+	body["11"] = json.RawMessage(`"ORDER002"`)
+	envelope["Body"] = body
+	header := envelope["Header"]
+	header["49"] = json.RawMessage(`"CLIENT2"`) // SenderCompID
+	header["56"] = json.RawMessage(`"SERVER2"`) // TargetCompID
+	envelope["Header"] = header
+	modifiedJSON, err := json.Marshal(envelope)
+	require.NoError(t, err)
+
+	// Step 4: send the modified JSON via out2 (json mode).
+	require.NoError(t, out2.Write(ctx, service.NewMessage(modifiedJSON)))
+
+	// Step 5: read the resulting raw FIX from inp2 and assert the modification.
+	readCtx2, readCancel2 := context.WithTimeout(ctx, 10*time.Second)
+	defer readCancel2()
+
+	fixMsg, ackFn2, err := inp2.Read(readCtx2)
+	require.NoError(t, err)
+	require.NoError(t, ackFn2(ctx, nil))
+
+	fixBytes, err := fixMsg.AsBytes()
+	require.NoError(t, err)
+	fixStr := string(fixBytes)
+
+	assert.Contains(t, fixStr, "11=ORDER002\x01", "ClOrdID should reflect the pipeline modification")
+	assert.Contains(t, fixStr, "55=AAPL\x01", "Symbol should be preserved through the JSON round-trip")
+	assert.Contains(t, fixStr, "35=D\x01", "MsgType should be preserved")
 }

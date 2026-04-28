@@ -6,14 +6,15 @@ import (
 	"strings"
 	"sync"
 
-	goquickfix "github.com/quickfixgo/quickfix"
+	goquickfix "codeberg.org/hsctech/quickfix"
+	"codeberg.org/hsctech/quickfix/datadictionary"
 
 	"github.com/warpstreamlabs/bento/public/service"
 )
 
 func quickfixOutputSpec() *service.ConfigSpec {
 	return service.NewConfigSpec().
-		Summary("Sends FIX messages using the QuickFIX/Go engine. Operates as an acceptor (server) or initiator (client). The message payload must be a raw FIX string; SOH (`\\x01`) and pipe (`|`) delimiters are both accepted.").
+		Summary("Sends FIX messages using the QuickFIX/Go engine. Operates as an acceptor (server) or initiator (client). The message payload must be a raw FIX string (SOH or pipe delimiters) or a JSON object when `message_format` is set to `json`.").
 		Categories("Network").
 		Fields(
 			service.NewStringEnumField(fieldConnectionType, "acceptor", "initiator").
@@ -39,6 +40,9 @@ BeginString=FIX.4.4
 
 [SESSION]
 SocketAcceptPort=5001`),
+			service.NewStringEnumField(fieldMessageFormat, "raw", "json").
+				Description("The format of the incoming message payload. `raw` expects a wire-format FIX string (SOH or pipe delimited). `json` expects a JSON object with `Header`, `Body`, and `Trailer` sections as produced by the quickfix input.").
+				Default("raw"),
 		)
 }
 
@@ -54,9 +58,11 @@ func init() {
 }
 
 type quickfixOutput struct {
-	log      *service.Logger
-	connType string
-	settings string
+	log           *service.Logger
+	connType      string
+	settings      string
+	messageFormat string
+	dd            *datadictionary.DataDictionary
 
 	sessionsMut      sync.RWMutex
 	loggedOnSessions map[goquickfix.SessionID]struct{}
@@ -79,6 +85,14 @@ func newQuickfixOutputFromParsed(pConf *service.ParsedConfig, mgr *service.Resou
 	if w.settings, err = pConf.FieldString(fieldSettings); err != nil {
 		return nil, err
 	}
+	if w.messageFormat, err = pConf.FieldString(fieldMessageFormat); err != nil {
+		return nil, err
+	}
+
+	if w.messageFormat == "json" {
+		w.dd = loadDataDictionary(w.settings, mgr.Logger())
+	}
+
 	return w, nil
 }
 
@@ -157,10 +171,10 @@ func (w *quickfixOutput) Connect(ctx context.Context) error {
 	return nil
 }
 
-// Write sends a raw FIX string message via the active QuickFIX session.
-// The message is routed by its BeginString, SenderCompID and TargetCompID
-// header fields. The session assigns sequence numbers and recalculates
-// BodyLength and CheckSum automatically.
+// Write sends a FIX message via the active QuickFIX session.
+// In "raw" mode the payload must be a FIX wire string (SOH or pipe delimited).
+// In "json" mode the payload must be a JSON object with Header/Body/Trailer
+// sections as produced by the quickfix input in json mode.
 func (w *quickfixOutput) Write(ctx context.Context, msg *service.Message) error {
 	w.sessionsMut.RLock()
 	hasSession := len(w.loggedOnSessions) > 0
@@ -175,14 +189,20 @@ func (w *quickfixOutput) Write(ctx context.Context, msg *service.Message) error 
 		return err
 	}
 
-	// Accept pipe-delimited (human-readable) format as well as SOH-delimited.
-	if bytes.ContainsRune(rawBytes, '|') && !bytes.ContainsRune(rawBytes, '\x01') {
-		rawBytes = bytes.ReplaceAll(rawBytes, []byte("|"), []byte("\x01"))
-	}
-
 	fixMsg := goquickfix.NewMessage()
-	if err := goquickfix.ParseMessage(fixMsg, bytes.NewBuffer(rawBytes)); err != nil {
-		return err
+
+	if w.messageFormat == "json" {
+		if err := fixMsg.FromJSON(rawBytes, w.dd); err != nil {
+			return err
+		}
+	} else {
+		// Accept pipe-delimited (human-readable) format as well as SOH-delimited.
+		if bytes.ContainsRune(rawBytes, '|') && !bytes.ContainsRune(rawBytes, '\x01') {
+			rawBytes = bytes.ReplaceAll(rawBytes, []byte("|"), []byte("\x01"))
+		}
+		if err := goquickfix.ParseMessage(fixMsg, bytes.NewBuffer(rawBytes)); err != nil {
+			return err
+		}
 	}
 
 	return goquickfix.Send(fixMsg)

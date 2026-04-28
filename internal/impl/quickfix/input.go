@@ -6,7 +6,9 @@ import (
 	"strings"
 	"sync"
 
-	goquickfix "github.com/quickfixgo/quickfix"
+	goquickfix "codeberg.org/hsctech/quickfix"
+	"codeberg.org/hsctech/quickfix/config"
+	"codeberg.org/hsctech/quickfix/datadictionary"
 
 	"github.com/warpstreamlabs/bento/public/service"
 )
@@ -15,11 +17,12 @@ const (
 	fieldConnectionType = "connection_type"
 	fieldSettings       = "settings"
 	fieldBufferSize     = "buffer_size"
+	fieldMessageFormat  = "message_format"
 )
 
 func quickfixInputSpec() *service.ConfigSpec {
 	return service.NewConfigSpec().
-		Summary("Receives FIX messages using the QuickFIX/Go engine. Operates as an acceptor (server) or initiator (client). Each application-level message is emitted as a raw FIX string with SOH (`\\x01`) delimiters.").
+		Summary("Receives FIX messages using the QuickFIX/Go engine. Operates as an acceptor (server) or initiator (client). Each application-level message is emitted as a raw FIX string with SOH (`\\x01`) delimiters, or as a JSON object when `message_format` is set to `json`.").
 		Categories("Network").
 		Fields(
 			service.NewStringEnumField(fieldConnectionType, "acceptor", "initiator").
@@ -48,6 +51,9 @@ SocketConnectPort=5001`),
 			service.NewIntField(fieldBufferSize).
 				Description("The size of the internal channel buffer for received messages.").
 				Default(1000),
+			service.NewStringEnumField(fieldMessageFormat, "raw", "json").
+				Description("The format in which received FIX messages are emitted. `raw` emits the wire-format FIX string with SOH delimiters. `json` serialises each message to a JSON object with `Header`, `Body`, and `Trailer` sections using numeric tag keys.").
+				Default("raw"),
 			service.NewAutoRetryNacksToggleField(),
 		)
 }
@@ -67,10 +73,12 @@ func init() {
 }
 
 type quickfixInput struct {
-	log        *service.Logger
-	connType   string
-	settings   string
-	bufferSize int
+	log           *service.Logger
+	connType      string
+	settings      string
+	bufferSize    int
+	messageFormat string
+	dd            *datadictionary.DataDictionary
 
 	msgChan   chan *service.Message
 	closeOnce sync.Once
@@ -97,8 +105,39 @@ func newQuickfixInputFromParsed(pConf *service.ParsedConfig, mgr *service.Resour
 	if r.bufferSize, err = pConf.FieldInt(fieldBufferSize); err != nil {
 		return nil, err
 	}
+	if r.messageFormat, err = pConf.FieldString(fieldMessageFormat); err != nil {
+		return nil, err
+	}
+
+	if r.messageFormat == "json" {
+		r.dd = loadDataDictionary(r.settings, mgr.Logger())
+	}
+
 	r.msgChan = make(chan *service.Message, r.bufferSize)
 	return r, nil
+}
+
+// loadDataDictionary attempts to extract and parse the DataDictionary (or
+// AppDataDictionary) path from a QuickFIX settings string. Returns nil if no
+// dictionary is configured or if parsing fails.
+func loadDataDictionary(settings string, log *service.Logger) *datadictionary.DataDictionary {
+	qfSettings, err := goquickfix.ParseSettings(strings.NewReader(settings))
+	if err != nil {
+		return nil
+	}
+	for _, s := range qfSettings.SessionSettings() {
+		for _, key := range []string{config.AppDataDictionary, config.DataDictionary} {
+			if path, err := s.Setting(key); err == nil && path != "" {
+				dd, err := datadictionary.Parse(path)
+				if err != nil {
+					log.Warnf("Failed to parse FIX data dictionary %q: %v", path, err)
+					return nil
+				}
+				return dd
+			}
+		}
+	}
+	return nil
 }
 
 //------------------------------------------------------------------------------
@@ -126,9 +165,19 @@ func (r *quickfixInput) FromAdmin(message *goquickfix.Message, sessionID goquick
 
 // FromApp is called by QuickFIX for every application-level message received.
 func (r *quickfixInput) FromApp(message *goquickfix.Message, sessionID goquickfix.SessionID) goquickfix.MessageRejectError {
-	msg := service.NewMessage(bytes.TrimRight(message.Bytes(), "\x01"))
+	var bentoMsg *service.Message
+	if r.messageFormat == "json" {
+		jsonBytes, err := message.ToJSON(r.dd)
+		if err != nil {
+			r.log.Errorf("Failed to serialise FIX message to JSON from session %s: %v", sessionID, err)
+			return nil
+		}
+		bentoMsg = service.NewMessage(jsonBytes)
+	} else {
+		bentoMsg = service.NewMessage(bytes.TrimRight(message.Bytes(), "\x01"))
+	}
 	select {
-	case r.msgChan <- msg:
+	case r.msgChan <- bentoMsg:
 	default:
 		r.log.Warnf("Message buffer full, dropping FIX message from session %s", sessionID)
 	}
