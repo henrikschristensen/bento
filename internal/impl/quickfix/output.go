@@ -146,7 +146,7 @@ func (w *quickfixOutput) Connect(ctx context.Context) error {
 	}
 
 	storeFactory := goquickfix.NewMemoryStoreFactory()
-	logFactory := goquickfix.NewNullLogFactory()
+	logFactory := newBentoLogFactory(w.log)
 
 	switch w.connType {
 	case "acceptor":

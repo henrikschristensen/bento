@@ -52,7 +52,7 @@ SocketConnectPort=5001`),
 				Description("The size of the internal channel buffer for received messages.").
 				Default(1000),
 			service.NewStringEnumField(fieldMessageFormat, "raw", "json").
-				Description("The format in which received FIX messages are emitted. `raw` emits the wire-format FIX string with SOH delimiters. `json` serialises each message to a JSON object with `Header`, `Body`, and `Trailer` sections using numeric tag keys.").
+				Description("The format in which received FIX messages are emitted. `raw` emits the wire-format FIX string with SOH delimiters. `json` serialises each message to a JSON object with `Header`, `Body`, and `Trailer` sections with fieldname/value pairs.").
 				Default("raw"),
 			service.NewAutoRetryNacksToggleField(),
 		)
@@ -201,7 +201,7 @@ func (r *quickfixInput) Connect(ctx context.Context) error {
 	}
 
 	storeFactory := goquickfix.NewMemoryStoreFactory()
-	logFactory := goquickfix.NewNullLogFactory()
+	logFactory := newBentoLogFactory(r.log)
 
 	switch r.connType {
 	case "acceptor":

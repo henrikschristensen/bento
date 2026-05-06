@@ -18,7 +18,7 @@ import TabItem from '@theme/TabItem';
 :::caution EXPERIMENTAL
 This component is experimental and therefore subject to change or removal outside of major version releases.
 :::
-Receives FIX messages using the QuickFIX/Go engine. Operates as an acceptor (server) or initiator (client). Each application-level message is emitted as a raw FIX string with SOH (`\x01`) delimiters.
+Receives FIX messages using the QuickFIX/Go engine. Operates as an acceptor (server) or initiator (client). Each application-level message is emitted as a raw FIX string with SOH (`\x01`) delimiters, or as a JSON object when `message_format` is set to `json`.
 
 ```yml
 # Config fields, showing default values
@@ -37,6 +37,7 @@ input:
       [SESSION]
       SocketAcceptPort=5001
     buffer_size: 1000
+    message_format: raw
     auto_replay_nacks: true
 ```
 
@@ -91,6 +92,15 @@ The size of the internal channel buffer for received messages.
 
 Type: `int`  
 Default: `1000`  
+
+### `message_format`
+
+The format in which received FIX messages are emitted. `raw` emits the wire-format FIX string with SOH delimiters. `json` serialises each message to a JSON object with `Header`, `Body`, and `Trailer` sections using numeric tag keys.
+
+
+Type: `string`  
+Default: `"raw"`  
+Options: `raw`, `json`.
 
 ### `auto_replay_nacks`
 

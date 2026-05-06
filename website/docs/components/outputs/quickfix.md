@@ -18,7 +18,7 @@ import TabItem from '@theme/TabItem';
 :::caution EXPERIMENTAL
 This component is experimental and therefore subject to change or removal outside of major version releases.
 :::
-Sends FIX messages using the QuickFIX/Go engine. Operates as an acceptor (server) or initiator (client). The message payload must be a raw FIX string; SOH (`\x01`) and pipe (`|`) delimiters are both accepted.
+Sends FIX messages using the QuickFIX/Go engine. Operates as an acceptor (server) or initiator (client). The message payload must be a raw FIX string (SOH or pipe delimiters) or a JSON object when `message_format` is set to `json`.
 
 ```yml
 # Config fields, showing default values
@@ -37,6 +37,7 @@ output:
       [SESSION]
       SocketConnectHost=localhost
       SocketConnectPort=5001
+    message_format: raw
 ```
 
 ## Fields
@@ -82,5 +83,14 @@ settings: |-
   [SESSION]
   SocketAcceptPort=5001
 ```
+
+### `message_format`
+
+The format of the incoming message payload. `raw` expects a wire-format FIX string (SOH or pipe delimited). `json` expects a JSON object with `Header`, `Body`, and `Trailer` sections as produced by the quickfix input.
+
+
+Type: `string`  
+Default: `"raw"`  
+Options: `raw`, `json`.
 
 
