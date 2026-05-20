@@ -105,7 +105,7 @@ require (
 	github.com/microsoft/gocosmos v1.1.1
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/nats-io/nats-mq v0.0.0-20260326100941-777c3a970fa1
-	github.com/nats-io/nats.go v1.49.0
+	github.com/nats-io/nats.go v1.52.0
 	github.com/nats-io/nkeys v0.4.15
 	github.com/nats-io/stan.go v0.10.4
 	github.com/nsf/jsondiff v0.0.0-20230430225905-43f6cf3098c1
@@ -275,7 +275,7 @@ require (
 	cloud.google.com/go/monitoring v1.24.3 // indirect
 	cloud.google.com/go/spanner v1.86.1
 	cloud.google.com/go/trace v1.11.7 // indirect
-	codeberg.org/hsctech/quickfix v0.0.0-20260421165104-59ee45800a82
+	codeberg.org/hsctech/quickfix v0.0.0-20260520095055-f9bcdf7ee102
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/99designs/keyring v1.2.2 // indirect

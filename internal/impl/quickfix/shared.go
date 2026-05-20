@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	goquickfix "codeberg.org/hsctech/quickfix"
+	"codeberg.org/hsctech/quickfix/config"
+	natsstore "codeberg.org/hsctech/quickfix/store/nats"
 
 	"github.com/warpstreamlabs/bento/public/service"
 )
@@ -136,7 +138,7 @@ func (e *sharedEngine) start() error {
 		return err
 	}
 
-	storeFactory := goquickfix.NewMemoryStoreFactory()
+	storeFactory := selectStoreFactory(qfSettings)
 	logFactory := newBentoLogFactory(e.log)
 
 	switch e.connType {
@@ -232,4 +234,28 @@ func (e *sharedEngine) FromApp(message *goquickfix.Message, sessionID goquickfix
 		}
 	}
 	return nil
+}
+
+// selectStoreFactory returns the QuickFIX MessageStoreFactory implied by the
+// parsed FIX settings. If the NATS Object Store URL setting is present in any
+// session (or in the global defaults), the NATS-backed factory is used so FIX
+// session state survives process restarts. Otherwise the in-memory factory is
+// used.
+func selectStoreFactory(qfSettings *goquickfix.Settings) goquickfix.MessageStoreFactory {
+	if hasSetting(qfSettings, config.NatsStoreURL) {
+		return natsstore.NewStoreFactory(qfSettings)
+	}
+	return goquickfix.NewMemoryStoreFactory()
+}
+
+func hasSetting(qfSettings *goquickfix.Settings, key string) bool {
+	if v, err := qfSettings.GlobalSettings().Setting(key); err == nil && v != "" {
+		return true
+	}
+	for _, s := range qfSettings.SessionSettings() {
+		if v, err := s.Setting(key); err == nil && v != "" {
+			return true
+		}
+	}
+	return false
 }
