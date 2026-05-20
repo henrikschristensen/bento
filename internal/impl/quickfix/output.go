@@ -3,7 +3,6 @@ package quickfix
 import (
 	"bytes"
 	"context"
-	"strings"
 	"sync"
 
 	goquickfix "codeberg.org/hsctech/quickfix"
@@ -15,8 +14,12 @@ import (
 func quickfixOutputSpec() *service.ConfigSpec {
 	return service.NewConfigSpec().
 		Summary("Sends FIX messages using the QuickFIX/Go engine. Operates as an acceptor (server) or initiator (client). The message payload must be a raw FIX string (SOH or pipe delimiters) or a JSON object when `message_format` is set to `json`.").
+		Description(`When the `+"`name`"+` field is set, the underlying QuickFIX engine is shared with any other ` + "`quickfix`" + ` input or output that uses the same name. This allows a single FIX connection (initiator or acceptor) to be initiated by any input or output and reused by any combination of inputs and outputs. The first component to reference a shared name must supply ` + "`connection_type`" + ` and ` + "`settings`" + `; subsequent components referencing the same name may omit them, but if supplied they must match the originally registered values.`).
 		Categories("Network").
 		Fields(
+			service.NewStringField(fieldName).
+				Description("Optional name used to share a single QuickFIX engine across multiple `quickfix` inputs and outputs. Components referencing the same name reuse the same underlying acceptor or initiator connection, and must all be configured with identical `connection_type` and `settings`.").
+				Default(""),
 			service.NewStringEnumField(fieldConnectionType, "acceptor", "initiator").
 				Description("Whether to listen for incoming connections (`acceptor`) or connect to a remote host (`initiator`)."),
 			service.NewStringField(fieldSettings).
@@ -59,6 +62,7 @@ func init() {
 
 type quickfixOutput struct {
 	log           *service.Logger
+	name          string
 	connType      string
 	settings      string
 	messageFormat string
@@ -68,8 +72,7 @@ type quickfixOutput struct {
 	loggedOnSessions map[goquickfix.SessionID]struct{}
 
 	engineMut sync.Mutex
-	acceptor  *goquickfix.Acceptor
-	initiator *goquickfix.Initiator
+	engine    *sharedEngine
 }
 
 func newQuickfixOutputFromParsed(pConf *service.ParsedConfig, mgr *service.Resources) (*quickfixOutput, error) {
@@ -79,6 +82,9 @@ func newQuickfixOutputFromParsed(pConf *service.ParsedConfig, mgr *service.Resou
 	}
 
 	var err error
+	if w.name, err = pConf.FieldString(fieldName); err != nil {
+		return nil, err
+	}
 	if w.connType, err = pConf.FieldString(fieldConnectionType); err != nil {
 		return nil, err
 	}
@@ -89,6 +95,10 @@ func newQuickfixOutputFromParsed(pConf *service.ParsedConfig, mgr *service.Resou
 		return nil, err
 	}
 
+	if w.name == "" {
+		w.name = "_anon_" + randomID()
+	}
+
 	if w.messageFormat == "json" {
 		w.dd = loadDataDictionary(w.settings, mgr.Logger())
 	}
@@ -97,35 +107,25 @@ func newQuickfixOutputFromParsed(pConf *service.ParsedConfig, mgr *service.Resou
 }
 
 //------------------------------------------------------------------------------
-// quickfix.Application interface
+// fixSubscriber
 
-func (w *quickfixOutput) OnCreate(sessionID goquickfix.SessionID) {}
-
-func (w *quickfixOutput) OnLogon(sessionID goquickfix.SessionID) {
+func (w *quickfixOutput) onLogon(sessionID goquickfix.SessionID) {
 	w.log.Infof("FIX session logged on: %s", sessionID)
 	w.sessionsMut.Lock()
 	w.loggedOnSessions[sessionID] = struct{}{}
 	w.sessionsMut.Unlock()
 }
 
-func (w *quickfixOutput) OnLogout(sessionID goquickfix.SessionID) {
+func (w *quickfixOutput) onLogout(sessionID goquickfix.SessionID) {
 	w.log.Infof("FIX session logged out: %s", sessionID)
 	w.sessionsMut.Lock()
 	delete(w.loggedOnSessions, sessionID)
 	w.sessionsMut.Unlock()
 }
 
-func (w *quickfixOutput) ToAdmin(message *goquickfix.Message, sessionID goquickfix.SessionID) {}
-
-func (w *quickfixOutput) ToApp(message *goquickfix.Message, sessionID goquickfix.SessionID) error {
-	return nil
-}
-
-func (w *quickfixOutput) FromAdmin(message *goquickfix.Message, sessionID goquickfix.SessionID) goquickfix.MessageRejectError {
-	return nil
-}
-
-func (w *quickfixOutput) FromApp(message *goquickfix.Message, sessionID goquickfix.SessionID) goquickfix.MessageRejectError {
+// fromApp is a no-op for outputs; inbound messages are dispatched by the
+// shared engine but outputs don't consume them.
+func (w *quickfixOutput) fromApp(message *goquickfix.Message, sessionID goquickfix.SessionID) goquickfix.MessageRejectError {
 	return nil
 }
 
@@ -136,38 +136,21 @@ func (w *quickfixOutput) Connect(ctx context.Context) error {
 	w.engineMut.Lock()
 	defer w.engineMut.Unlock()
 
-	if w.acceptor != nil || w.initiator != nil {
+	if w.engine != nil {
 		return nil
 	}
 
-	qfSettings, err := goquickfix.ParseSettings(strings.NewReader(w.settings))
+	eng, err := acquireSharedEngine(w.name, w.connType, w.settings, w.log)
 	if err != nil {
 		return err
 	}
-
-	storeFactory := goquickfix.NewMemoryStoreFactory()
-	logFactory := newBentoLogFactory(w.log)
-
-	switch w.connType {
-	case "acceptor":
-		a, err := goquickfix.NewAcceptor(w, storeFactory, qfSettings, logFactory)
-		if err != nil {
-			return err
-		}
-		if err := a.Start(); err != nil {
-			return err
-		}
-		w.acceptor = a
-	case "initiator":
-		i, err := goquickfix.NewInitiator(w, storeFactory, qfSettings, logFactory)
-		if err != nil {
-			return err
-		}
-		if err := i.Start(); err != nil {
-			return err
-		}
-		w.initiator = i
+	eng.subscribe(w)
+	if err := eng.start(); err != nil {
+		eng.unsubscribe(w)
+		releaseSharedEngine(w.name)
+		return err
 	}
+	w.engine = eng
 	return nil
 }
 
@@ -212,13 +195,10 @@ func (w *quickfixOutput) Close(ctx context.Context) error {
 	w.engineMut.Lock()
 	defer w.engineMut.Unlock()
 
-	if w.acceptor != nil {
-		w.acceptor.Stop()
-		w.acceptor = nil
-	}
-	if w.initiator != nil {
-		w.initiator.Stop()
-		w.initiator = nil
+	if w.engine != nil {
+		w.engine.unsubscribe(w)
+		releaseSharedEngine(w.name)
+		w.engine = nil
 	}
 	return nil
 }

@@ -25,6 +25,7 @@ Sends FIX messages using the QuickFIX/Go engine. Operates as an acceptor (server
 output:
   label: ""
   quickfix:
+    name: ""
     connection_type: "" # No default (required)
     settings: |- # No default (required)
       [DEFAULT]
@@ -40,7 +41,17 @@ output:
     message_format: raw
 ```
 
+When the `name` field is set, the underlying QuickFIX engine is shared with any other `quickfix` input or output that uses the same name. This allows a single FIX connection (initiator or acceptor) to be initiated by any input or output and reused by any combination of inputs and outputs. The first component to reference a shared name must supply `connection_type` and `settings`; subsequent components referencing the same name may omit them, but if supplied they must match the originally registered values.
+
 ## Fields
+
+### `name`
+
+Optional name used to share a single QuickFIX engine across multiple `quickfix` inputs and outputs. Components referencing the same name reuse the same underlying acceptor or initiator connection, and must all be configured with identical `connection_type` and `settings`.
+
+
+Type: `string`  
+Default: `""`  
 
 ### `connection_type`
 

@@ -25,6 +25,7 @@ Receives FIX messages using the QuickFIX/Go engine. Operates as an acceptor (ser
 input:
   label: ""
   quickfix:
+    name: ""
     connection_type: "" # No default (required)
     settings: |- # No default (required)
       [DEFAULT]
@@ -41,7 +42,17 @@ input:
     auto_replay_nacks: true
 ```
 
+When the `name` field is set, the underlying QuickFIX engine is shared with any other `quickfix` input or output that uses the same name. This allows a single FIX connection (initiator or acceptor) to be initiated by any input or output and reused by any combination of inputs and outputs. The first component to reference a shared name must supply `connection_type` and `settings`; subsequent components referencing the same name may omit them, but if supplied they must match the originally registered values.
+
 ## Fields
+
+### `name`
+
+Optional name used to share a single QuickFIX engine across multiple `quickfix` inputs and outputs. Components referencing the same name reuse the same underlying acceptor or initiator connection, and must all be configured with identical `connection_type` and `settings`.
+
+
+Type: `string`  
+Default: `""`  
 
 ### `connection_type`
 
@@ -95,7 +106,7 @@ Default: `1000`
 
 ### `message_format`
 
-The format in which received FIX messages are emitted. `raw` emits the wire-format FIX string with SOH delimiters. `json` serialises each message to a JSON object with `Header`, `Body`, and `Trailer` sections using numeric tag keys.
+The format in which received FIX messages are emitted. `raw` emits the wire-format FIX string with SOH delimiters. `json` serialises each message to a JSON object with `Header`, `Body`, and `Trailer` sections with fieldname/value pairs.
 
 
 Type: `string`  

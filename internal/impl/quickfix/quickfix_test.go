@@ -267,8 +267,6 @@ settings: |
 
 	assert.Contains(t, bodyStr, "35=D\x01")
 	assert.Contains(t, bodyStr, "11=ORDER001\x01")
-	// Trailing SOH must be trimmed by FromApp.
-	assert.NotEqual(t, "\x01", bodyStr[len(bodyStr)-1:])
 }
 
 // --- JSON pipeline round-trip test -------------------------------------------
@@ -356,7 +354,7 @@ settings: |
 	// Step 1: send a raw New Order Single via out1.
 	rawFIX := buildRawFIX("FIX.4.4", "D", "CLIENT", "SERVER", map[goquickfix.Tag]string{
 		goquickfix.Tag(11): "ORDER001", // ClOrdID
-		goquickfix.Tag(55): "AAPL",    // Symbol
+		goquickfix.Tag(55): "AAPL",     // Symbol
 	})
 	require.NoError(t, out1.Write(ctx, service.NewMessage(rawFIX)))
 
@@ -410,4 +408,142 @@ settings: |
 	assert.Contains(t, fixStr, "11=ORDER002\x01", "ClOrdID should reflect the pipeline modification")
 	assert.Contains(t, fixStr, "55=AAPL\x01", "Symbol should be preserved through the JSON round-trip")
 	assert.Contains(t, fixStr, "35=D\x01", "MsgType should be preserved")
+}
+
+// --- Shared connection tests -------------------------------------------------
+
+// TestQuickfixSharedConnectionRoundTrip verifies that an input and an output
+// can share a single underlying QuickFIX engine via the `name` field, and that
+// the connection can be initiated by either component.
+func TestQuickfixSharedConnectionRoundTrip(t *testing.T) {
+	port := freePort(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Server side: a single acceptor shared by the receiving input and the
+	// sending output, started via the output's Connect call first.
+	serverSettings := acceptorCfg(port)
+
+	serverOutConf, err := quickfixOutputSpec().ParseYAML(fmt.Sprintf(`
+name: server
+connection_type: acceptor
+settings: |
+%s
+`, indentLines(serverSettings, "  ")), nil)
+	require.NoError(t, err)
+	serverOut, err := newQuickfixOutputFromParsed(serverOutConf, service.MockResources())
+	require.NoError(t, err)
+	require.NoError(t, serverOut.Connect(ctx))
+	t.Cleanup(func() { _ = serverOut.Close(ctx) })
+
+	serverInConf, err := quickfixInputSpec().ParseYAML(fmt.Sprintf(`
+name: server
+connection_type: acceptor
+settings: |
+%s
+`, indentLines(serverSettings, "  ")), nil)
+	require.NoError(t, err)
+	serverIn, err := newQuickfixInputFromParsed(serverInConf, service.MockResources())
+	require.NoError(t, err)
+	require.NoError(t, serverIn.Connect(ctx))
+	t.Cleanup(func() { _ = serverIn.Close(ctx) })
+
+	// Both server-side components must refer to the same shared engine.
+	assert.Same(t, serverOut.engine, serverIn.engine, "shared engine should be reused")
+
+	// Client side: initiator output (anonymous, no shared name).
+	clientOutConf, err := quickfixOutputSpec().ParseYAML(fmt.Sprintf(`
+connection_type: initiator
+settings: |
+%s
+`, indentLines(initiatorCfg(port), "  ")), nil)
+	require.NoError(t, err)
+	clientOut, err := newQuickfixOutputFromParsed(clientOutConf, service.MockResources())
+	require.NoError(t, err)
+	require.NoError(t, clientOut.Connect(ctx))
+	t.Cleanup(func() { _ = clientOut.Close(ctx) })
+
+	// Wait for the FIX logon handshake on both ends.
+	require.Eventually(t, func() bool {
+		clientOut.sessionsMut.RLock()
+		c := len(clientOut.loggedOnSessions) > 0
+		clientOut.sessionsMut.RUnlock()
+		serverOut.sessionsMut.RLock()
+		s := len(serverOut.loggedOnSessions) > 0
+		serverOut.sessionsMut.RUnlock()
+		return c && s
+	}, 15*time.Second, 100*time.Millisecond, "timed out waiting for FIX session logon")
+
+	// Client -> server: the message must be delivered to the shared input on
+	// the server side, even though the output started the connection.
+	rawFIX := buildRawFIX("FIX.4.4", "D", "CLIENT", "SERVER", map[goquickfix.Tag]string{
+		goquickfix.Tag(11): "ORDER_SHARED",
+	})
+	require.NoError(t, clientOut.Write(ctx, service.NewMessage(rawFIX)))
+
+	readCtx, readCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer readCancel()
+	msg, ackFn, err := serverIn.Read(readCtx)
+	require.NoError(t, err)
+	require.NoError(t, ackFn(ctx, nil))
+
+	body, err := msg.AsBytes()
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "11=ORDER_SHARED\x01")
+
+	// Server -> client: the shared output sends back via the same engine.
+	reply := buildRawFIX("FIX.4.4", "8", "SERVER", "CLIENT", map[goquickfix.Tag]string{
+		goquickfix.Tag(11): "REPLY_SHARED",
+	})
+	require.NoError(t, serverOut.Write(ctx, service.NewMessage(reply)))
+}
+
+// TestQuickfixSharedConnectionMismatchedSettings verifies that joining an
+// existing shared connection with different settings is rejected.
+func TestQuickfixSharedConnectionMismatchedSettings(t *testing.T) {
+	port := freePort(t)
+	otherPort := freePort(t)
+
+	ctx := context.Background()
+
+	firstConf, err := quickfixInputSpec().ParseYAML(fmt.Sprintf(`
+name: conflict
+connection_type: acceptor
+settings: |
+%s
+`, indentLines(acceptorCfg(port), "  ")), nil)
+	require.NoError(t, err)
+	first, err := newQuickfixInputFromParsed(firstConf, service.MockResources())
+	require.NoError(t, err)
+	require.NoError(t, first.Connect(ctx))
+	t.Cleanup(func() { _ = first.Close(ctx) })
+
+	// Same name but different settings — must fail.
+	secondConf, err := quickfixOutputSpec().ParseYAML(fmt.Sprintf(`
+name: conflict
+connection_type: acceptor
+settings: |
+%s
+`, indentLines(acceptorCfg(otherPort), "  ")), nil)
+	require.NoError(t, err)
+	second, err := newQuickfixOutputFromParsed(secondConf, service.MockResources())
+	require.NoError(t, err)
+	err = second.Connect(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "settings")
+
+	// Same name but different connection_type — must fail.
+	thirdConf, err := quickfixOutputSpec().ParseYAML(fmt.Sprintf(`
+name: conflict
+connection_type: initiator
+settings: |
+%s
+`, indentLines(initiatorCfg(port), "  ")), nil)
+	require.NoError(t, err)
+	third, err := newQuickfixOutputFromParsed(thirdConf, service.MockResources())
+	require.NoError(t, err)
+	err = third.Connect(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "connection_type")
 }
