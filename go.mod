@@ -275,7 +275,7 @@ require (
 	cloud.google.com/go/monitoring v1.24.3 // indirect
 	cloud.google.com/go/spanner v1.86.1
 	cloud.google.com/go/trace v1.11.7 // indirect
-	codeberg.org/hsctech/quickfix v0.0.0-20260520095055-f9bcdf7ee102
+	codeberg.org/hsctech/quickfix v0.0.0-20260521063539-55468c0acc79
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/99designs/keyring v1.2.2 // indirect
