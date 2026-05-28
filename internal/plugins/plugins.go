@@ -2,7 +2,6 @@ package plugins
 
 import (
 	"github.com/warpstreamlabs/bento/internal/plugins/bloblang"
-	"github.com/warpstreamlabs/bento/internal/plugins/inputs"
 )
 
 func RegisterPlugins() {
@@ -14,5 +13,4 @@ func RegisterPlugins() {
 	bloblang.RegisterGetNumDaysInMonth()
 	bloblang.RegisterTimeDiffDaysAbsolute()
 	bloblang.RegisterRounding()
-	inputs.RegisterFsEventInput()
 }
