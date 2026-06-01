@@ -39,6 +39,10 @@ type sharedEngine struct {
 
 	subsMu sync.RWMutex
 	subs   []fixSubscriber
+
+	// loggedOnMu guards loggedOnSessions.
+	loggedOnMu      sync.RWMutex
+	loggedOnSessions map[goquickfix.SessionID]struct{}
 }
 
 var (
@@ -62,10 +66,11 @@ func acquireSharedEngine(name, connType, settings string, log *service.Logger) (
 			return nil, fmt.Errorf("no existing quickfix connection named %q; the first input or output to reference a shared connection must provide connection_type and settings", name)
 		}
 		eng = &sharedEngine{
-			name:     name,
-			connType: connType,
-			settings: settings,
-			log:      log,
+			name:             name,
+			connType:         connType,
+			settings:         settings,
+			log:              log,
+			loggedOnSessions: make(map[goquickfix.SessionID]struct{}),
 		}
 		sharedReg[name] = eng
 	} else {
@@ -100,13 +105,28 @@ func releaseSharedEngine(name string) {
 
 func (e *sharedEngine) subscribe(s fixSubscriber) {
 	e.subsMu.Lock()
-	defer e.subsMu.Unlock()
 	for _, existing := range e.subs {
 		if existing == s {
+			e.subsMu.Unlock()
 			return
 		}
 	}
 	e.subs = append(e.subs, s)
+	e.subsMu.Unlock()
+
+	// Replay currently-logged-on sessions to the new subscriber so that
+	// components which subscribe after the FIX session is established (e.g.
+	// lazily-initialized output resources) see the correct logon state and do
+	// not incorrectly report ErrNotConnected.
+	e.loggedOnMu.RLock()
+	sessions := make([]goquickfix.SessionID, 0, len(e.loggedOnSessions))
+	for sid := range e.loggedOnSessions {
+		sessions = append(sessions, sid)
+	}
+	e.loggedOnMu.RUnlock()
+	for _, sid := range sessions {
+		s.onLogon(sid)
+	}
 }
 
 func (e *sharedEngine) unsubscribe(s fixSubscriber) {
@@ -193,6 +213,10 @@ func (e *sharedEngine) stop() {
 func (e *sharedEngine) OnCreate(sessionID goquickfix.SessionID) {}
 
 func (e *sharedEngine) OnLogon(sessionID goquickfix.SessionID) {
+	e.loggedOnMu.Lock()
+	e.loggedOnSessions[sessionID] = struct{}{}
+	e.loggedOnMu.Unlock()
+
 	e.subsMu.RLock()
 	subs := append([]fixSubscriber(nil), e.subs...)
 	e.subsMu.RUnlock()
@@ -202,6 +226,10 @@ func (e *sharedEngine) OnLogon(sessionID goquickfix.SessionID) {
 }
 
 func (e *sharedEngine) OnLogout(sessionID goquickfix.SessionID) {
+	e.loggedOnMu.Lock()
+	delete(e.loggedOnSessions, sessionID)
+	e.loggedOnMu.Unlock()
+
 	e.subsMu.RLock()
 	subs := append([]fixSubscriber(nil), e.subs...)
 	e.subsMu.RUnlock()

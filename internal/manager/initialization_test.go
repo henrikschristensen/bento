@@ -152,8 +152,11 @@ func TestInitializationOrdering(t *testing.T) {
 	resConf.ResourceProcessors = append(resConf.ResourceProcessors, procConf)
 	resConf.ResourceRateLimits = append(resConf.ResourceRateLimits, rlConf)
 
-	_, err := New(resConf, OptSetEnvironment(env))
+	mgr, err := New(resConf, OptSetEnvironment(env))
 	require.NoError(t, err)
+
+	// Input resources are lazily initialized, trigger construction by accessing.
+	_ = mgr.AccessInput(context.Background(), "fooinput", func(i input.Streamed) {})
 
 	wg.Wait()
 }

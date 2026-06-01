@@ -394,6 +394,47 @@ generate:
 	assert.EqualError(t, err, "unable to locate resource: baz")
 }
 
+func TestManagerInputLazyInitialization(t *testing.T) {
+	env := bundle.NewEnvironment()
+
+	var constructed []string
+	require.NoError(t, env.InputAdd(func(c input.Config, mgr bundle.NewManagement) (input.Streamed, error) {
+		constructed = append(constructed, c.Label)
+		return nil, nil
+	}, docs.ComponentSpec{
+		Name: "testinput",
+	}))
+
+	usedConf := input.NewConfig()
+	usedConf.Label = "used_input"
+	usedConf.Type = "testinput"
+
+	unusedConf := input.NewConfig()
+	unusedConf.Label = "unused_input"
+	unusedConf.Type = "testinput"
+
+	conf := manager.NewResourceConfig()
+	conf.ResourceInputs = append(conf.ResourceInputs, usedConf, unusedConf)
+
+	mgr, err := manager.New(conf, manager.OptSetEnvironment(env))
+	require.NoError(t, err)
+
+	// Neither input should be constructed yet.
+	assert.Empty(t, constructed)
+
+	// ProbeInput should still report both as known.
+	assert.True(t, mgr.ProbeInput("used_input"))
+	assert.True(t, mgr.ProbeInput("unused_input"))
+
+	// Accessing a resource should trigger lazy construction.
+	err = mgr.AccessInput(context.Background(), "used_input", func(i input.Streamed) {})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"used_input"}, constructed)
+
+	// The unused input should still not be constructed.
+	assert.True(t, mgr.ProbeInput("unused_input"))
+}
+
 func TestManagerInputListErrors(t *testing.T) {
 	cFoo := input.NewConfig()
 	cFoo.Label = "foo"
@@ -439,6 +480,54 @@ func TestManagerOutputList(t *testing.T) {
 	err = mgr.AccessOutput(context.Background(), "baz", func(ow output.Sync) {})
 	assert.EqualError(t, err, "unable to locate resource: baz")
 }
+
+func TestManagerOutputLazyInitialization(t *testing.T) {
+	env := bundle.NewEnvironment()
+
+	var constructed []string
+	require.NoError(t, env.OutputAdd(func(c output.Config, mgr bundle.NewManagement, p ...processor.PipelineConstructorFunc) (output.Streamed, error) {
+		constructed = append(constructed, c.Label)
+		return &mockStreamedOutput{}, nil
+	}, docs.ComponentSpec{
+		Name: "testoutput",
+	}))
+
+	usedConf := output.NewConfig()
+	usedConf.Label = "used_output"
+	usedConf.Type = "testoutput"
+
+	unusedConf := output.NewConfig()
+	unusedConf.Label = "unused_output"
+	unusedConf.Type = "testoutput"
+
+	conf := manager.NewResourceConfig()
+	conf.ResourceOutputs = append(conf.ResourceOutputs, usedConf, unusedConf)
+
+	mgr, err := manager.New(conf, manager.OptSetEnvironment(env))
+	require.NoError(t, err)
+
+	// Neither output should be constructed yet.
+	assert.Empty(t, constructed)
+
+	// ProbeOutput should still report both as known.
+	assert.True(t, mgr.ProbeOutput("used_output"))
+	assert.True(t, mgr.ProbeOutput("unused_output"))
+
+	// Accessing a resource should trigger lazy construction.
+	err = mgr.AccessOutput(context.Background(), "used_output", func(o output.Sync) {})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"used_output"}, constructed)
+
+	// The unused output should still not be constructed.
+	assert.True(t, mgr.ProbeOutput("unused_output"))
+}
+
+type mockStreamedOutput struct{}
+
+func (m *mockStreamedOutput) Consume(<-chan message.Transaction) error        { return nil }
+func (m *mockStreamedOutput) ConnectionStatus() component.ConnectionStatuses { return nil }
+func (m *mockStreamedOutput) TriggerCloseNow()                               {}
+func (m *mockStreamedOutput) WaitForClose(ctx context.Context) error         { return nil }
 
 func TestManagerOutputListErrors(t *testing.T) {
 	cFoo := output.NewConfig()

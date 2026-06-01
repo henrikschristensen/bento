@@ -98,6 +98,14 @@ type Type struct {
 
 	// Generic key/value store for plugin implementations.
 	genericValues *sync.Map
+
+	// Pending input configs for lazy initialization. Input resources are not
+	// constructed until first accessed.
+	pendingInputConfigs *sync.Map // map[string]input.Config
+
+	// Pending output configs for lazy initialization. Output resources are not
+	// constructed until first accessed.
+	pendingOutputConfigs *sync.Map // map[string]output.Config
 }
 
 // OptFunc is an opt setting for a manager type.
@@ -219,6 +227,9 @@ func New(conf ResourceConfig, opts ...OptFunc) (*Type, error) {
 		pipeCtor: constructor.New,
 
 		genericValues: &sync.Map{},
+
+		pendingInputConfigs:  &sync.Map{},
+		pendingOutputConfigs: &sync.Map{},
 	}
 
 	for _, opt := range opts {
@@ -295,15 +306,11 @@ func New(conf ResourceConfig, opts ...OptFunc) (*Type, error) {
 	}
 
 	for _, conf := range conf.ResourceInputs {
-		if err := t.StoreInput(context.Background(), conf.Label, conf); err != nil {
-			return nil, err
-		}
+		t.pendingInputConfigs.Store(conf.Label, conf)
 	}
 
 	for _, conf := range conf.ResourceOutputs {
-		if err := t.StoreOutput(context.Background(), conf.Label, conf); err != nil {
-			return nil, err
-		}
+		t.pendingOutputConfigs.Store(conf.Label, conf)
 	}
 
 	if err := t.env.ConstructorInit(t); err != nil {
@@ -603,10 +610,47 @@ func (t *Type) AccessInput(ctx context.Context, name string, fn func(input.Strea
 			return
 		}
 		fn(t)
-	}); rerr != nil {
-		err = rerr
+	}); rerr == nil {
+		return err
 	}
-	return
+
+	// Resource slot exists but is nil (lazy init pending), or doesn't exist.
+	if !t.inputs.Probe(name) {
+		return ErrResourceNotFound(name)
+	}
+
+	// Attempt lazy initialization under write lock.
+	var initErr error
+	if accessErr := t.inputs.Access(name, false, func(i **InputWrapper, set func(**InputWrapper)) {
+		// Double-check: another goroutine may have initialized it.
+		if i != nil {
+			fn(*i)
+			return
+		}
+
+		rawConf, ok := t.pendingInputConfigs.Load(name)
+		if !ok {
+			initErr = ErrResourceNotFound(name)
+			return
+		}
+
+		conf := rawConf.(input.Config)
+
+		newInput, newErr := t.intoPath("input_resources").NewInput(conf)
+		if newErr != nil {
+			initErr = newErr
+			return
+		}
+
+		ni := WrapInput(newInput)
+		set(&ni)
+		t.pendingInputConfigs.Delete(name)
+
+		fn(ni)
+	}); accessErr != nil {
+		return accessErr
+	}
+	return initErr
 }
 
 // NewInput attempts to create a new input component from a config.
@@ -618,6 +662,7 @@ func (t *Type) NewInput(conf input.Config) (input.Streamed, error) {
 // has the same name it is closed and removed _before_ the new one is
 // initialized in order to avoid duplicate connections.
 func (t *Type) StoreInput(ctx context.Context, name string, conf input.Config) error {
+	t.pendingInputConfigs.Delete(name)
 	var initErr error
 	if err := t.inputs.Access(name, true, func(i **InputWrapper, set func(**InputWrapper)) {
 		if i != nil {
@@ -653,6 +698,7 @@ func (t *Type) StoreInput(ctx context.Context, name string, conf input.Config) e
 
 // RemoveInput attempts to close and remove an existing input resource.
 func (t *Type) RemoveInput(ctx context.Context, name string) error {
+	t.pendingInputConfigs.Delete(name)
 	var closeErr error
 	if err := t.inputs.Access(name, false, func(i **InputWrapper, set func(i **InputWrapper)) {
 		if i == nil {
@@ -767,10 +813,52 @@ func (t *Type) AccessOutput(ctx context.Context, name string, fn func(output.Syn
 			return
 		}
 		fn(t)
-	}); rerr != nil {
-		err = rerr
+	}); rerr == nil {
+		return err
 	}
-	return
+
+	// Resource slot exists but is nil (lazy init pending), or doesn't exist.
+	if !t.outputs.Probe(name) {
+		return ErrResourceNotFound(name)
+	}
+
+	// Attempt lazy initialization under write lock.
+	var initErr error
+	if accessErr := t.outputs.Access(name, false, func(o **outputWrapper, set func(**outputWrapper)) {
+		// Double-check: another goroutine may have initialized it.
+		if o != nil {
+			fn(*o)
+			return
+		}
+
+		rawConf, ok := t.pendingOutputConfigs.Load(name)
+		if !ok {
+			initErr = ErrResourceNotFound(name)
+			return
+		}
+
+		conf := rawConf.(output.Config)
+
+		newOutput, newErr := t.intoPath("output_resources").NewOutput(conf)
+		if newErr != nil {
+			initErr = newErr
+			return
+		}
+
+		var wrappedOutput *outputWrapper
+		if wrappedOutput, initErr = wrapOutput(newOutput); initErr != nil {
+			newOutput.TriggerCloseNow()
+			return
+		}
+
+		set(&wrappedOutput)
+		t.pendingOutputConfigs.Delete(name)
+
+		fn(wrappedOutput)
+	}); accessErr != nil {
+		return accessErr
+	}
+	return initErr
 }
 
 // NewOutput attempts to create a new output component from a config.
@@ -782,6 +870,7 @@ func (t *Type) NewOutput(conf output.Config, pipelines ...processor.PipelineCons
 // has the same name it is closed and removed _before_ the new one is
 // initialized in order to avoid duplicate connections.
 func (t *Type) StoreOutput(ctx context.Context, name string, conf output.Config) error {
+	t.pendingOutputConfigs.Delete(name)
 	var initErr error
 	if err := t.outputs.Access(name, true, func(o **outputWrapper, set func(**outputWrapper)) {
 		if o != nil {
@@ -819,6 +908,7 @@ func (t *Type) StoreOutput(ctx context.Context, name string, conf output.Config)
 
 // RemoveOutput attempts to close and remove an existing output resource.
 func (t *Type) RemoveOutput(ctx context.Context, name string) error {
+	t.pendingOutputConfigs.Delete(name)
 	var closeErr error
 	if err := t.outputs.Access(name, false, func(o **outputWrapper, set func(o **outputWrapper)) {
 		if o == nil {
