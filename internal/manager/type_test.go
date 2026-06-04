@@ -408,10 +408,12 @@ func TestManagerInputLazyInitialization(t *testing.T) {
 	usedConf := input.NewConfig()
 	usedConf.Label = "used_input"
 	usedConf.Type = "testinput"
+	usedConf.LazyLoad = true
 
 	unusedConf := input.NewConfig()
 	unusedConf.Label = "unused_input"
 	unusedConf.Type = "testinput"
+	unusedConf.LazyLoad = true
 
 	conf := manager.NewResourceConfig()
 	conf.ResourceInputs = append(conf.ResourceInputs, usedConf, unusedConf)
@@ -433,6 +435,32 @@ func TestManagerInputLazyInitialization(t *testing.T) {
 
 	// The unused input should still not be constructed.
 	assert.True(t, mgr.ProbeInput("unused_input"))
+}
+
+func TestManagerInputEagerInitialization(t *testing.T) {
+	env := bundle.NewEnvironment()
+
+	var constructed []string
+	require.NoError(t, env.InputAdd(func(c input.Config, mgr bundle.NewManagement) (input.Streamed, error) {
+		constructed = append(constructed, c.Label)
+		return nil, nil
+	}, docs.ComponentSpec{
+		Name: "testinput",
+	}))
+
+	eagerConf := input.NewConfig()
+	eagerConf.Label = "eager_input"
+	eagerConf.Type = "testinput"
+	// LazyLoad defaults to false.
+
+	conf := manager.NewResourceConfig()
+	conf.ResourceInputs = append(conf.ResourceInputs, eagerConf)
+
+	_, err := manager.New(conf, manager.OptSetEnvironment(env))
+	require.NoError(t, err)
+
+	// Eager input resources are constructed during manager.New.
+	assert.Equal(t, []string{"eager_input"}, constructed)
 }
 
 func TestManagerInputListErrors(t *testing.T) {
@@ -495,10 +523,12 @@ func TestManagerOutputLazyInitialization(t *testing.T) {
 	usedConf := output.NewConfig()
 	usedConf.Label = "used_output"
 	usedConf.Type = "testoutput"
+	usedConf.LazyLoad = true
 
 	unusedConf := output.NewConfig()
 	unusedConf.Label = "unused_output"
 	unusedConf.Type = "testoutput"
+	unusedConf.LazyLoad = true
 
 	conf := manager.NewResourceConfig()
 	conf.ResourceOutputs = append(conf.ResourceOutputs, usedConf, unusedConf)
@@ -520,6 +550,32 @@ func TestManagerOutputLazyInitialization(t *testing.T) {
 
 	// The unused output should still not be constructed.
 	assert.True(t, mgr.ProbeOutput("unused_output"))
+}
+
+func TestManagerOutputEagerInitialization(t *testing.T) {
+	env := bundle.NewEnvironment()
+
+	var constructed []string
+	require.NoError(t, env.OutputAdd(func(c output.Config, mgr bundle.NewManagement, p ...processor.PipelineConstructorFunc) (output.Streamed, error) {
+		constructed = append(constructed, c.Label)
+		return &mockStreamedOutput{}, nil
+	}, docs.ComponentSpec{
+		Name: "testoutput",
+	}))
+
+	eagerConf := output.NewConfig()
+	eagerConf.Label = "eager_output"
+	eagerConf.Type = "testoutput"
+	// LazyLoad defaults to false.
+
+	conf := manager.NewResourceConfig()
+	conf.ResourceOutputs = append(conf.ResourceOutputs, eagerConf)
+
+	_, err := manager.New(conf, manager.OptSetEnvironment(env))
+	require.NoError(t, err)
+
+	// Eager output resources are constructed during manager.New.
+	assert.Equal(t, []string{"eager_output"}, constructed)
 }
 
 type mockStreamedOutput struct{}

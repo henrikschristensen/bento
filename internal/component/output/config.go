@@ -17,6 +17,11 @@ type Config struct {
 	Type       string             `json:"type" yaml:"type"`
 	Plugin     any                `json:"plugin,omitempty" yaml:"plugin,omitempty"`
 	Processors []processor.Config `json:"processors" yaml:"processors"`
+
+	// LazyLoad, when true and the config is used as an output resource, defers
+	// construction of the underlying output until it is first accessed. It has
+	// no effect on inline outputs.
+	LazyLoad bool `json:"lazy_load" yaml:"lazy_load"`
 }
 
 // NewConfig returns a configuration struct fully populated with default values.
@@ -28,6 +33,7 @@ func NewConfig() Config {
 		Type:       "stdout",
 		Plugin:     nil,
 		Processors: []processor.Config{},
+		LazyLoad:   false,
 	}
 }
 
@@ -51,6 +57,9 @@ func fromMap(prov docs.Provider, value map[string]any) (conf Config, err error) 
 	}
 
 	conf.Label, _ = value["label"].(string)
+	if v, ok := value["lazy_load"].(bool); ok {
+		conf.LazyLoad = v
+	}
 
 	if procV, exists := value["processors"]; exists {
 		procArr, ok := procV.([]any)
@@ -86,6 +95,11 @@ func fromYAML(prov docs.Provider, value *yaml.Node) (conf Config, err error) {
 		switch value.Content[i].Value {
 		case "label":
 			conf.Label = value.Content[i+1].Value
+		case "lazy_load":
+			if err = value.Content[i+1].Decode(&conf.LazyLoad); err != nil {
+				err = fmt.Errorf("lazy_load: %w", err)
+				return
+			}
 		case "processors":
 			for i, n := range value.Content[i+1].Content {
 				var tmpProc processor.Config

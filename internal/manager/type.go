@@ -306,11 +306,23 @@ func New(conf ResourceConfig, opts ...OptFunc) (*Type, error) {
 	}
 
 	for _, conf := range conf.ResourceInputs {
-		t.pendingInputConfigs.Store(conf.Label, conf)
+		if conf.LazyLoad {
+			t.pendingInputConfigs.Store(conf.Label, conf)
+			continue
+		}
+		if err := t.StoreInput(context.Background(), conf.Label, conf); err != nil {
+			return nil, err
+		}
 	}
 
 	for _, conf := range conf.ResourceOutputs {
-		t.pendingOutputConfigs.Store(conf.Label, conf)
+		if conf.LazyLoad {
+			t.pendingOutputConfigs.Store(conf.Label, conf)
+			continue
+		}
+		if err := t.StoreOutput(context.Background(), conf.Label, conf); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := t.env.ConstructorInit(t); err != nil {

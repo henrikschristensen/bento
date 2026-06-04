@@ -73,6 +73,15 @@ func ReservedFieldsByType(t Type) map[string]FieldSpec {
 			}
 			return "", false
 		})
+		m["lazy_load"] = FieldBool(
+			"lazy_load",
+			"When `true` and this config is declared as an `input_resources`/`output_resources` entry, the underlying resource is not constructed until it is first accessed. Has no effect on inline inputs/outputs.",
+		).HasDefault(false).Advanced().OmitWhen(func(field, _ any) (string, bool) {
+			if b, ok := field.(bool); ok && !b {
+				return "field lazy_load is false and can be removed", true
+			}
+			return "", false
+		})
 	}
 	if t == TypeMetrics {
 		m["mapping"] = MetricsMappingFieldSpec("mapping")
