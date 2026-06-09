@@ -108,42 +108,76 @@ func (p *kvCache) connect(ctx context.Context) error {
 	return nil
 }
 
-func (p *kvCache) Get(ctx context.Context, key string) ([]byte, error) {
+func (p *kvCache) getKV(ctx context.Context) (nats.KeyValue, error) {
+	if err := p.connect(ctx); err != nil {
+		return nil, err
+	}
 	p.connMut.RLock()
-	defer p.connMut.RUnlock()
+	kv := p.kv
+	p.connMut.RUnlock()
+	if kv == nil {
+		return nil, errors.New("nats kv cache not connected")
+	}
+	return kv, nil
+}
 
-	entry, err := p.kv.Get(key)
+func (p *kvCache) Get(ctx context.Context, key string) ([]byte, error) {
+	kv, err := p.getKV(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	entry, err := kv.Get(key)
 	if err != nil {
 		if errors.Is(err, nats.ErrKeyNotFound) {
-			err = service.ErrKeyNotFound
+			return nil, service.ErrKeyNotFound
 		}
+		p.disconnect()
 		return nil, err
 	}
 	return entry.Value(), nil
 }
 
 func (p *kvCache) Set(ctx context.Context, key string, value []byte, _ *time.Duration) error {
-	p.connMut.RLock()
-	defer p.connMut.RUnlock()
+	kv, err := p.getKV(ctx)
+	if err != nil {
+		return err
+	}
 
-	_, err := p.kv.Put(key, value)
+	_, err = kv.Put(key, value)
+	if err != nil {
+		p.disconnect()
+	}
 	return err
 }
 
 func (p *kvCache) Add(ctx context.Context, key string, value []byte, _ *time.Duration) error {
-	p.connMut.RLock()
-	defer p.connMut.RUnlock()
-	_, err := p.kv.Create(key, value)
+	kv, err := p.getKV(ctx)
+	if err != nil {
+		return err
+	}
+
+	_, err = kv.Create(key, value)
 	if errors.Is(err, nats.ErrKeyExists) {
 		return service.ErrKeyAlreadyExists
+	}
+	if err != nil {
+		p.disconnect()
 	}
 	return err
 }
 
 func (p *kvCache) Delete(ctx context.Context, key string) error {
-	p.connMut.RLock()
-	defer p.connMut.RUnlock()
-	return p.kv.Delete(key)
+	kv, err := p.getKV(ctx)
+	if err != nil {
+		return err
+	}
+
+	err = kv.Delete(key)
+	if err != nil {
+		p.disconnect()
+	}
+	return err
 }
 
 func (p *kvCache) Close(ctx context.Context) error {
