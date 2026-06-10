@@ -121,7 +121,7 @@ buffer_size: 500
 	r, err := newQuickfixInputFromParsed(conf, service.MockResources())
 	require.NoError(t, err)
 
-	assert.Equal(t, "acceptor", r.connType)
+	assert.Equal(t, "acceptor", r.cfg.connType)
 	assert.Equal(t, 500, r.bufferSize)
 }
 
@@ -136,7 +136,7 @@ settings: |
 	w, err := newQuickfixOutputFromParsed(conf, service.MockResources())
 	require.NoError(t, err)
 
-	assert.Equal(t, "initiator", w.connType)
+	assert.Equal(t, "initiator", w.cfg.connType)
 }
 
 func TestQuickfixInputConnectInvalidSettings(t *testing.T) {

@@ -10,7 +10,6 @@ import (
 
 	"github.com/warpstreamlabs/bento/public/service"
 )
-
 func quickfixOutputSpec() *service.ConfigSpec {
 	return service.NewConfigSpec().
 		Summary("Sends FIX messages using the QuickFIX/Go engine. Operates as an acceptor (server) or initiator (client). The message payload must be a raw FIX string (SOH or pipe delimiters) or a JSON object when `message_format` is set to `json`.").
@@ -62,9 +61,7 @@ func init() {
 
 type quickfixOutput struct {
 	log           *service.Logger
-	name          string
-	connType      string
-	settings      string
+	cfg           connConfig
 	messageFormat string
 	dd            *datadictionary.DataDictionary
 
@@ -82,25 +79,15 @@ func newQuickfixOutputFromParsed(pConf *service.ParsedConfig, mgr *service.Resou
 	}
 
 	var err error
-	if w.name, err = pConf.FieldString(fieldName); err != nil {
-		return nil, err
-	}
-	if w.connType, err = pConf.FieldString(fieldConnectionType); err != nil {
-		return nil, err
-	}
-	if w.settings, err = pConf.FieldString(fieldSettings); err != nil {
+	if w.cfg, err = parseConnConfig(pConf); err != nil {
 		return nil, err
 	}
 	if w.messageFormat, err = pConf.FieldString(fieldMessageFormat); err != nil {
 		return nil, err
 	}
 
-	if w.name == "" {
-		w.name = "_anon_" + randomID()
-	}
-
 	if w.messageFormat == "json" {
-		w.dd = loadDataDictionary(w.settings, mgr.Logger())
+		w.dd = loadDataDictionary(w.cfg.settings, mgr.Logger())
 	}
 
 	return w, nil
@@ -140,14 +127,8 @@ func (w *quickfixOutput) Connect(ctx context.Context) error {
 		return nil
 	}
 
-	eng, err := acquireSharedEngine(w.name, w.connType, w.settings, w.log)
+	eng, err := connectEngine(w.cfg, w.log, w)
 	if err != nil {
-		return err
-	}
-	eng.subscribe(w)
-	if err := eng.start(); err != nil {
-		eng.unsubscribe(w)
-		releaseSharedEngine(w.name)
 		return err
 	}
 	w.engine = eng
@@ -195,10 +176,7 @@ func (w *quickfixOutput) Close(ctx context.Context) error {
 	w.engineMut.Lock()
 	defer w.engineMut.Unlock()
 
-	if w.engine != nil {
-		w.engine.unsubscribe(w)
-		releaseSharedEngine(w.name)
-		w.engine = nil
-	}
+	disconnectEngine(w.cfg.name, w.engine, w)
+	w.engine = nil
 	return nil
 }

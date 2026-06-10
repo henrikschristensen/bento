@@ -2,25 +2,15 @@ package quickfix
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"strings"
 	"sync"
 
 	goquickfix "codeberg.org/hsctech/quickfix"
-	"codeberg.org/hsctech/quickfix/config"
 	"codeberg.org/hsctech/quickfix/datadictionary"
 
 	"github.com/warpstreamlabs/bento/public/service"
 )
 
-const (
-	fieldConnectionType = "connection_type"
-	fieldSettings       = "settings"
-	fieldBufferSize     = "buffer_size"
-	fieldMessageFormat  = "message_format"
-	fieldName           = "name"
-)
+const fieldBufferSize = "buffer_size"
 
 func quickfixInputSpec() *service.ConfigSpec {
 	return service.NewConfigSpec().
@@ -80,9 +70,7 @@ func init() {
 
 type quickfixInput struct {
 	log           *service.Logger
-	name          string
-	connType      string
-	settings      string
+	cfg           connConfig
 	bufferSize    int
 	messageFormat string
 	dd            *datadictionary.DataDictionary
@@ -102,13 +90,7 @@ func newQuickfixInputFromParsed(pConf *service.ParsedConfig, mgr *service.Resour
 	}
 
 	var err error
-	if r.name, err = pConf.FieldString(fieldName); err != nil {
-		return nil, err
-	}
-	if r.connType, err = pConf.FieldString(fieldConnectionType); err != nil {
-		return nil, err
-	}
-	if r.settings, err = pConf.FieldString(fieldSettings); err != nil {
+	if r.cfg, err = parseConnConfig(pConf); err != nil {
 		return nil, err
 	}
 	if r.bufferSize, err = pConf.FieldInt(fieldBufferSize); err != nil {
@@ -118,50 +100,12 @@ func newQuickfixInputFromParsed(pConf *service.ParsedConfig, mgr *service.Resour
 		return nil, err
 	}
 
-	if r.name == "" {
-		// Components without an explicit name get a unique identifier so they
-		// each get their own engine and don't accidentally share connections.
-		r.name = "_anon_" + randomID()
-	}
-
 	if r.messageFormat == "json" {
-		r.dd = loadDataDictionary(r.settings, mgr.Logger())
+		r.dd = loadDataDictionary(r.cfg.settings, mgr.Logger())
 	}
 
 	r.msgChan = make(chan *service.Message, r.bufferSize)
 	return r, nil
-}
-
-func randomID() string {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
-}
-
-// loadDataDictionary attempts to extract and parse the DataDictionary (or
-// AppDataDictionary) path from a QuickFIX settings string. Returns nil if no
-// dictionary is configured or if parsing fails.
-func loadDataDictionary(settings string, log *service.Logger) *datadictionary.DataDictionary {
-	if settings == "" {
-		return nil
-	}
-	qfSettings, err := goquickfix.ParseSettings(strings.NewReader(settings))
-	if err != nil {
-		return nil
-	}
-	for _, s := range qfSettings.SessionSettings() {
-		for _, key := range []string{config.AppDataDictionary, config.DataDictionary} {
-			if path, err := s.Setting(key); err == nil && path != "" {
-				dd, err := datadictionary.Parse(path)
-				if err != nil {
-					log.Warnf("Failed to parse FIX data dictionary %q: %v", path, err)
-					return nil
-				}
-				return dd
-			}
-		}
-	}
-	return nil
 }
 
 //------------------------------------------------------------------------------
@@ -208,14 +152,8 @@ func (r *quickfixInput) Connect(ctx context.Context) error {
 		return nil
 	}
 
-	eng, err := acquireSharedEngine(r.name, r.connType, r.settings, r.log)
+	eng, err := connectEngine(r.cfg, r.log, r)
 	if err != nil {
-		return err
-	}
-	eng.subscribe(r)
-	if err := eng.start(); err != nil {
-		eng.unsubscribe(r)
-		releaseSharedEngine(r.name)
 		return err
 	}
 	r.engine = eng
@@ -241,11 +179,8 @@ func (r *quickfixInput) Close(ctx context.Context) error {
 		r.engineMut.Lock()
 		defer r.engineMut.Unlock()
 
-		if r.engine != nil {
-			r.engine.unsubscribe(r)
-			releaseSharedEngine(r.name)
-			r.engine = nil
-		}
+		disconnectEngine(r.cfg.name, r.engine, r)
+		r.engine = nil
 		close(r.closeChan)
 	})
 	return nil
