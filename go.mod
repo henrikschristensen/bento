@@ -1,5 +1,7 @@
 module github.com/warpstreamlabs/bento
 
+replace codeberg.org/hsctech/quickfix => ../quickfix
+
 require (
 	buf.build/gen/go/bufbuild/reflect/connectrpc/go v1.18.1-20240117202343-bf8f65e8876c.1
 	buf.build/gen/go/bufbuild/reflect/protocolbuffers/go v1.36.2-20240117202343-bf8f65e8876c.1

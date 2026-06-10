@@ -1,6 +1,7 @@
 package quickfix
 
 import (
+	"crypto/tls"
 	"fmt"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ type sharedEngine struct {
 	name     string
 	connType string
 	settings string
+	tlsConf  *tls.Config
 
 	log *service.Logger
 
@@ -53,10 +55,12 @@ var (
 // acquireSharedEngine returns a shared engine for the given name, creating it
 // if necessary. When the name refers to an existing engine the connection_type
 // and settings (if supplied) must match the originally registered values.
+// For shared connections the first registrant's tlsConf is used; subsequent
+// components may pass nil to inherit it.
 //
 // The reference count is incremented on every successful call; callers must
 // invoke releaseSharedEngine when they are finished using the engine.
-func acquireSharedEngine(name, connType, settings string, log *service.Logger) (*sharedEngine, error) {
+func acquireSharedEngine(name, connType, settings string, tlsConf *tls.Config, log *service.Logger) (*sharedEngine, error) {
 	sharedRegMu.Lock()
 	defer sharedRegMu.Unlock()
 
@@ -69,6 +73,7 @@ func acquireSharedEngine(name, connType, settings string, log *service.Logger) (
 			name:             name,
 			connType:         connType,
 			settings:         settings,
+			tlsConf:          tlsConf,
 			log:              log,
 			loggedOnSessions: make(map[goquickfix.SessionID]struct{}),
 		}
@@ -167,6 +172,9 @@ func (e *sharedEngine) start() error {
 		if err != nil {
 			return err
 		}
+		if e.tlsConf != nil {
+			a.SetTLSConfig(e.tlsConf)
+		}
 		if err := a.Start(); err != nil {
 			// NewAcceptor has already registered the sessions in goquickfix's
 			// global session registry; Stop() unregisters them so subsequent
@@ -179,6 +187,9 @@ func (e *sharedEngine) start() error {
 		i, err := goquickfix.NewInitiator(e, storeFactory, qfSettings, logFactory)
 		if err != nil {
 			return err
+		}
+		if e.tlsConf != nil {
+			i.SetTLSConfig(e.tlsConf)
 		}
 		if err := i.Start(); err != nil {
 			i.Stop()

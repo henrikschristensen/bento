@@ -2,6 +2,7 @@ package quickfix
 
 import (
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"strings"
 
@@ -24,6 +25,7 @@ type connConfig struct {
 	name     string
 	connType string
 	settings string
+	tlsConf  *tls.Config
 }
 
 // parseConnConfig reads the shared connection fields from a parsed config and
@@ -39,6 +41,13 @@ func parseConnConfig(pConf *service.ParsedConfig) (connConfig, error) {
 	}
 	if c.settings, err = pConf.FieldString(fieldSettings); err != nil {
 		return c, err
+	}
+	var tlsEnabled bool
+	if c.tlsConf, tlsEnabled, err = pConf.FieldTLSToggled("tls"); err != nil {
+		return c, err
+	}
+	if !tlsEnabled {
+		c.tlsConf = nil
 	}
 	if c.name == "" {
 		// Components without an explicit name get a unique identifier so they
@@ -83,7 +92,7 @@ func loadDataDictionary(settings string, log *service.Logger) *datadictionary.Da
 // connectEngine acquires (or creates) the shared engine for cfg, subscribes
 // sub to it, starts it if not already running, and returns the engine.
 func connectEngine(cfg connConfig, log *service.Logger, sub fixSubscriber) (*sharedEngine, error) {
-	eng, err := acquireSharedEngine(cfg.name, cfg.connType, cfg.settings, log)
+	eng, err := acquireSharedEngine(cfg.name, cfg.connType, cfg.settings, cfg.tlsConf, log)
 	if err != nil {
 		return nil, err
 	}

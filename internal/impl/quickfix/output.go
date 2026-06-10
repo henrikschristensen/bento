@@ -45,6 +45,7 @@ SocketAcceptPort=5001`),
 			service.NewStringEnumField(fieldMessageFormat, "raw", "json").
 				Description("The format of the incoming message payload. `raw` expects a wire-format FIX string (SOH or pipe delimited). `json` expects a JSON object with `Header`, `Body`, and `Trailer` sections as produced by the quickfix input.").
 				Default("raw"),
+			service.NewTLSToggledField("tls"),
 		)
 }
 

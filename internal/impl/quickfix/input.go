@@ -50,6 +50,7 @@ SocketConnectPort=5001`),
 			service.NewStringEnumField(fieldMessageFormat, "raw", "json").
 				Description("The format in which received FIX messages are emitted. `raw` emits the wire-format FIX string with SOH delimiters. `json` serialises each message to a JSON object with `Header`, `Body`, and `Trailer` sections with fieldname/value pairs.").
 				Default("raw"),
+			service.NewTLSToggledField("tls"),
 			service.NewAutoRetryNacksToggleField(),
 		)
 }
