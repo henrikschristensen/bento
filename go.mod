@@ -1,7 +1,5 @@
 module github.com/warpstreamlabs/bento
 
-replace codeberg.org/hsctech/quickfix => ../quickfix
-
 require (
 	buf.build/gen/go/bufbuild/reflect/connectrpc/go v1.18.1-20240117202343-bf8f65e8876c.1
 	buf.build/gen/go/bufbuild/reflect/protocolbuffers/go v1.36.2-20240117202343-bf8f65e8876c.1
@@ -281,7 +279,7 @@ require (
 	cloud.google.com/go/monitoring v1.24.3 // indirect
 	cloud.google.com/go/spanner v1.86.1
 	cloud.google.com/go/trace v1.11.7 // indirect
-	codeberg.org/hsctech/quickfix v0.0.0-20260521075830-6b8b38f30194
+	codeberg.org/hsctech/quickfix v0.0.0-20260610105412-774fdd83f225
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/99designs/keyring v1.2.2 // indirect

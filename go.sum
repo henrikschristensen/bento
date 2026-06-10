@@ -638,8 +638,8 @@ codeberg.org/go-latex/latex v0.1.0 h1:hoGO86rIbWVyjtlDLzCqZPjNykpWQ9YuTZqAzPcfL3
 codeberg.org/go-latex/latex v0.1.0/go.mod h1:LA0q/AyWIYrqVd+A9Upkgsb+IqPcmSTKc9Dny04MHMw=
 codeberg.org/go-pdf/fpdf v0.10.0 h1:u+w669foDDx5Ds43mpiiayp40Ov6sZalgcPMDBcZRd4=
 codeberg.org/go-pdf/fpdf v0.10.0/go.mod h1:Y0DGRAdZ0OmnZPvjbMp/1bYxmIPxm0ws4tfoPOc4LjU=
-codeberg.org/hsctech/quickfix v0.0.0-20260521075830-6b8b38f30194 h1:TqFK2cLpdSb0ppFC7RDxDSqHCDmqiAe3/swJ2RIrUjk=
-codeberg.org/hsctech/quickfix v0.0.0-20260521075830-6b8b38f30194/go.mod h1:bp0ZmdQGRBwSyMeKucr9JWsqNIjT5jhK2z1OXtk8eLY=
+codeberg.org/hsctech/quickfix v0.0.0-20260610105412-774fdd83f225 h1:5iX+cdP7OyT7HyuSkhftsi3zYsywlYkSE9IN+kTsBzM=
+codeberg.org/hsctech/quickfix v0.0.0-20260610105412-774fdd83f225/go.mod h1:bp0ZmdQGRBwSyMeKucr9JWsqNIjT5jhK2z1OXtk8eLY=
 connectrpc.com/connect v1.18.1 h1:PAg7CjSAGvscaf6YZKUefjoih5Z/qYkyaTrBW8xvYPw=
 connectrpc.com/connect v1.18.1/go.mod h1:0292hj1rnx8oFrStN7cB4jjVBeqs+Yx5yDIC2prWDO8=
 cuelabs.dev/go/oci/ociregistry v0.0.0-20231103182354-93e78c079a13 h1:zkiIe8AxZ/kDjqQN+mDKc5BxoVJOqioSdqApjc+eB1I=
