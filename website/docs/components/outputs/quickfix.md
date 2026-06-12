@@ -20,8 +20,16 @@ This component is experimental and therefore subject to change or removal outsid
 :::
 Sends FIX messages using the QuickFIX/Go engine. Operates as an acceptor (server) or initiator (client). The message payload must be a raw FIX string (SOH or pipe delimiters) or a JSON object when `message_format` is set to `json`.
 
+
+<Tabs defaultValue="common" values={[
+  { label: 'Common', value: 'common', },
+  { label: 'Advanced', value: 'advanced', },
+]}>
+
+<TabItem value="common">
+
 ```yml
-# Config fields, showing default values
+# Common config fields, showing default values
 output:
   label: ""
   quickfix:
@@ -40,6 +48,40 @@ output:
       SocketConnectPort=5001
     message_format: raw
 ```
+
+</TabItem>
+<TabItem value="advanced">
+
+```yml
+# All config fields, showing default values
+output:
+  label: ""
+  quickfix:
+    name: ""
+    connection_type: "" # No default (required)
+    settings: |- # No default (required)
+      [DEFAULT]
+      ConnectionType=initiator
+      HeartBtInt=30
+      SenderCompID=CLIENT
+      TargetCompID=SERVER
+      BeginString=FIX.4.4
+
+      [SESSION]
+      SocketConnectHost=localhost
+      SocketConnectPort=5001
+    message_format: raw
+    tls:
+      enabled: false
+      skip_cert_verify: false
+      enable_renegotiation: false
+      root_cas: ""
+      root_cas_file: ""
+      client_certs: []
+```
+
+</TabItem>
+</Tabs>
 
 When the `name` field is set, the underlying QuickFIX engine is shared with any other `quickfix` input or output that uses the same name. This allows a single FIX connection (initiator or acceptor) to be initiated by any input or output and reused by any combination of inputs and outputs. The first component to reference a shared name must supply `connection_type` and `settings`; subsequent components referencing the same name may omit them, but if supplied they must match the originally registered values.
 
@@ -103,5 +145,145 @@ The format of the incoming message payload. `raw` expects a wire-format FIX stri
 Type: `string`  
 Default: `"raw"`  
 Options: `raw`, `json`.
+
+### `tls`
+
+Custom TLS settings can be used to override system defaults.
+
+
+Type: `object`  
+
+### `tls.enabled`
+
+Whether custom TLS settings are enabled.
+
+
+Type: `bool`  
+Default: `false`  
+
+### `tls.skip_cert_verify`
+
+Whether to skip server side certificate verification.
+
+
+Type: `bool`  
+Default: `false`  
+
+### `tls.enable_renegotiation`
+
+Whether to allow the remote server to repeatedly request renegotiation. Enable this option if you're seeing the error message `local error: tls: no renegotiation`.
+
+
+Type: `bool`  
+Default: `false`  
+Requires version 1.0.0 or newer  
+
+### `tls.root_cas`
+
+An optional root certificate authority to use. This is a string, representing a certificate chain from the parent trusted root certificate, to possible intermediate signing certificates, to the host certificate.
+:::warning Secret
+This field contains sensitive information that usually shouldn't be added to a config directly, read our [secrets page for more info](/docs/configuration/secrets).
+:::
+
+
+Type: `string`  
+Default: `""`  
+
+```yml
+# Examples
+
+root_cas: |-
+  -----BEGIN CERTIFICATE-----
+  ...
+  -----END CERTIFICATE-----
+```
+
+### `tls.root_cas_file`
+
+An optional path of a root certificate authority file to use. This is a file, often with a .pem extension, containing a certificate chain from the parent trusted root certificate, to possible intermediate signing certificates, to the host certificate.
+
+
+Type: `string`  
+Default: `""`  
+
+```yml
+# Examples
+
+root_cas_file: ./root_cas.pem
+```
+
+### `tls.client_certs`
+
+A list of client certificates to use. For each certificate either the fields `cert` and `key`, or `cert_file` and `key_file` should be specified, but not both.
+
+
+Type: `array`  
+Default: `[]`  
+
+```yml
+# Examples
+
+client_certs:
+  - cert: foo
+    key: bar
+
+client_certs:
+  - cert_file: ./example.pem
+    key_file: ./example.key
+```
+
+### `tls.client_certs[].cert`
+
+A plain text certificate to use.
+
+
+Type: `string`  
+Default: `""`  
+
+### `tls.client_certs[].key`
+
+A plain text certificate key to use.
+:::warning Secret
+This field contains sensitive information that usually shouldn't be added to a config directly, read our [secrets page for more info](/docs/configuration/secrets).
+:::
+
+
+Type: `string`  
+Default: `""`  
+
+### `tls.client_certs[].cert_file`
+
+The path of a certificate to use.
+
+
+Type: `string`  
+Default: `""`  
+
+### `tls.client_certs[].key_file`
+
+The path of a certificate key to use.
+
+
+Type: `string`  
+Default: `""`  
+
+### `tls.client_certs[].password`
+
+A plain text password for when the private key is password encrypted in PKCS#1 or PKCS#8 format. The obsolete `pbeWithMD5AndDES-CBC` algorithm is not supported for the PKCS#8 format. Warning: Since it does not authenticate the ciphertext, it is vulnerable to padding oracle attacks that can let an attacker recover the plaintext.
+:::warning Secret
+This field contains sensitive information that usually shouldn't be added to a config directly, read our [secrets page for more info](/docs/configuration/secrets).
+:::
+
+
+Type: `string`  
+Default: `""`  
+
+```yml
+# Examples
+
+password: foo
+
+password: ${KEY_PASSWORD}
+```
 
 

@@ -40,12 +40,9 @@ input:
     subject: rpc.>
 
 output:
-  broker:
-    pattern: fan_out
-    outputs:
-      - sync_response: {}
-        processors:
-          - mapping: 'root = content().uppercase()'
+  sync_response: {}
+    processors:
+      - mapping: 'root = content().uppercase()'
 ` + "```" + `
 
 ` + connectionNameDescription() + authDescription()).
@@ -271,10 +268,6 @@ func (n *natsReader) Close(ctx context.Context) (err error) {
 	return
 }
 
-// natsReplyFromServiceMsg builds a *nats.Msg suitable for use as a NATS reply
-// from a service.Message produced by a sync_response output. The body is taken
-// from the message bytes and, when the server supports headers, all metadata
-// fields are forwarded as NATS headers.
 func natsReplyFromServiceMsg(m *service.Message, headersSupported bool) (*nats.Msg, error) {
 	data, err := m.AsBytes()
 	if err != nil {
