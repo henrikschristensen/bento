@@ -199,6 +199,7 @@ func (n *natsReader) Read(ctx context.Context) (*service.Message, service.AckFun
 	bmsg := service.NewMessage(msg.Data)
 	bmsg.MetaSetMut("nats_subject", msg.Subject)
 	bmsg.MetaSetMut("nats_reply_subject", msg.Reply)
+	bmsg.MetaSetMut("nats_msg", msg)
 	// process message headers if server supports the feature
 	if natsConn.HeadersSupported() {
 		for key := range msg.Header {
