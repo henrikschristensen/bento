@@ -18,7 +18,7 @@
     "yarn@latest"
   ],
   "env": {
-    "BENTO_VERSION": "1.18.2"
+    "BENTO_VERSION": "1.18.3"
   },
   "shell": {
     "init_hook": [
