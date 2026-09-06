@@ -207,7 +207,7 @@ var _ = registerSimpleMethod(
 
 var _ = registerSimpleMethod(
 	NewMethodSpec(
-		"round", "Rounds numbers to the nearest value with a given number of decimal places, defaulting to the nearest integer, rounding half away from zero. If the resulting value fits within a 64-bit integer then that is returned, otherwise a new floating point number is returned.",
+		"round", "Rounds numbers to the nearest value with a given number of decimal places, defaulting to the nearest integer. The rounding style for ties can be specified and defaults to half away from zero. If the resulting value fits within a 64-bit integer then that is returned, otherwise a new floating point number is returned.",
 	).InCategory(
 		MethodCategoryNumbers,
 		"",
@@ -223,10 +223,20 @@ var _ = registerSimpleMethod(
 			`{"value":2.675}`,
 			`{"new_value":2.68}`,
 		),
+		NewExampleSpec("",
+			`root.new_value = this.value.round(precision: 2, style: "half_even")`,
+			`{"value":0.125}`,
+			`{"new_value":0.12}`,
+		),
 	).
-		Param(ParamInt64("precision", "The number of decimal places to round to. Negative values round to tens, hundreds, and so on.").Optional()),
+		Param(ParamInt64("precision", "The number of decimal places to round to. Negative values round to tens, hundreds, and so on.").Optional()).
+		Param(ParamString("style", "The rounding style to use when the value lies exactly halfway between two candidates: `half_up` rounds ties away from zero, `half_even` rounds ties to the nearest even digit (banker's rounding), and `truncate` always rounds towards zero.").Default("half_up")),
 	func(args *ParsedParams) (simpleMethod, error) {
 		precision, err := args.FieldOptionalInt64("precision")
+		if err != nil {
+			return nil, err
+		}
+		style, err := args.FieldString("style")
 		if err != nil {
 			return nil, err
 		}
@@ -234,8 +244,11 @@ var _ = registerSimpleMethod(
 		if precision != nil {
 			p = *precision
 		}
+		if style != "half_up" && style != "half_even" && style != "truncate" {
+			return nil, fmt.Errorf("unknown rounding style %q: must be one of half_up, half_even, truncate", style)
+		}
 		roundAndCoerce := func(v float64) (any, error) {
-			rounded := roundToPrecision(v, p)
+			rounded := roundToPrecision(v, p, style)
 			if i, err := value.IToInt(rounded); err == nil {
 				return i, nil
 			}
@@ -259,11 +272,11 @@ var _ = registerSimpleMethod(
 	},
 )
 
-// roundToPrecision rounds v to the given number of decimal places, with ties
-// rounding away from zero. The value is rounded as its shortest decimal
-// representation, so 2.675 rounds to 2.68 at a precision of 2, free of float
+// roundToPrecision rounds v to the given number of decimal places using the
+// given style. The value is rounded as its shortest decimal representation,
+// so 2.675 rounds to 2.68 at a precision of 2 under half_up, free of float
 // shift artefacts.
-func roundToPrecision(v float64, precision int64) float64 {
+func roundToPrecision(v float64, precision int64, style string) float64 {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return v
 	}
@@ -295,7 +308,18 @@ func roundToPrecision(v float64, precision int64) float64 {
 	}
 
 	kept, discarded := digits[:point], digits[point:]
-	roundUp := discarded[0] >= '5'
+	roundUp := false
+	switch style {
+	case "half_up":
+		roundUp = discarded[0] >= '5'
+	case "half_even":
+		switch {
+		case discarded[0] > '5':
+			roundUp = true
+		case discarded[0] == '5':
+			roundUp = strings.TrimLeft(discarded[1:], "0") != "" || (kept != "" && kept[len(kept)-1]%2 == 1)
+		}
+	}
 
 	if roundUp {
 		b := []byte(kept)

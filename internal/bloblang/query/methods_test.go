@@ -2026,6 +2026,34 @@ func TestMethods(t *testing.T) {
 			input:  methods(literalFn(2.675), method("round", 2)),
 			output: 2.68,
 		},
+		"check round half_even tie down": {
+			input:  methods(literalFn(0.125), method("round", 2, "half_even")),
+			output: 0.12,
+		},
+		"check round half_even tie up": {
+			input:  methods(literalFn(0.375), method("round", 2, "half_even")),
+			output: 0.38,
+		},
+		"check round half_even integer tie even": {
+			input:  methods(literalFn(2.5), method("round", 0, "half_even")),
+			output: int64(2),
+		},
+		"check round half_even integer tie odd": {
+			input:  methods(literalFn(3.5), method("round", 0, "half_even")),
+			output: int64(4),
+		},
+		"check round half_even beyond tie": {
+			input:  methods(literalFn(0.1251), method("round", 2, "half_even")),
+			output: 0.13,
+		},
+		"check round truncate positive": {
+			input:  methods(literalFn(2.99), method("round", 1, "truncate")),
+			output: 2.9,
+		},
+		"check round truncate negative": {
+			input:  methods(literalFn(-1.9), method("round", 0, "truncate")),
+			output: int64(-1),
+		},
 		"check round half_up negative tie": {
 			input:  methods(literalFn(-1.5), method("round")),
 			output: int64(-2),
@@ -2240,6 +2268,11 @@ func TestMethodTargets(t *testing.T) {
 			assert.Equal(t, test.output, res)
 		})
 	}
+}
+
+func TestRoundMethodBadStyle(t *testing.T) {
+	_, err := InitMethodHelper("round", NewLiteralFunction("", 1.5), 2, "half_sideways")
+	require.EqualError(t, err, `unknown rounding style "half_sideways": must be one of half_up, half_even, truncate`)
 }
 
 func TestMethodNoArgsTargets(t *testing.T) {
